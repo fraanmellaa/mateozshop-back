@@ -1,0 +1,120 @@
+import { getProductById } from "@/app/utils/products";
+import { getUserByKickId } from "@/app/utils/users";
+import { db } from "@/db/drizzle";
+import { orders, products, users } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { NextRequest, NextResponse } from "next/server";
+
+import { z } from "zod";
+
+const bodySchema = z.object({
+  user_id: z.string(),
+});
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const resolvedParams = await params;
+  const product_id = resolvedParams.id;
+
+  let body;
+  try {
+    body = bodySchema.parse(await request.json());
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: "Invalid request body", details: error },
+        { status: 400 }
+      );
+    } else {
+      return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+    }
+  }
+
+  const { user_id } = body;
+
+  const user = await getUserByKickId(user_id);
+
+  if (!user) {
+    return NextResponse.json(
+      { success: false, error: "USER_NOT_FOUND" },
+      { status: 404 }
+    );
+  }
+
+  const actualPoints = user?.actual_points ?? 0;
+
+  if (actualPoints < 0) {
+    return NextResponse.json(
+      { success: false, error: "NOT_ENOUGH_POINTS" },
+      { status: 400 }
+    );
+  }
+
+  const product = await getProductById(parseInt(product_id));
+
+  if (!product) {
+    return NextResponse.json(
+      { success: false, error: "PRODUCT_NOT_FOUND" },
+      { status: 404 }
+    );
+  }
+
+  if (actualPoints < product.price) {
+    return NextResponse.json(
+      { success: false, error: "NOT_ENOUGH_POINTS" },
+      { status: 400 }
+    );
+  }
+
+  const userKickId = user.kick_id;
+
+  let order;
+  try {
+    await db.transaction(async (tx) => {
+      const newUsedPoints = user.used_points + product.price;
+      await tx
+        .update(users)
+        .set({
+          used_points: newUsedPoints,
+        })
+        .where(eq(users.kick_id, userKickId.toString()))
+        .returning();
+
+      order = await tx
+        .insert(orders)
+        .values({
+          user_id: user.id,
+          product_id: product.id,
+          status: 0, // 0: pending
+          total: product.price,
+          created_at: Math.floor(Date.now() / 1000), // Timestamp in seconds
+        })
+        .returning();
+
+      await db
+        .update(products)
+        .set({ stock: product.stock - 1 })
+        .where(eq(products.id, product.id));
+    });
+  } catch (error) {
+    console.error("Error creating order:", error);
+    return NextResponse.json(
+      { error: "Failed to create order" },
+      { status: 500 }
+    );
+  }
+
+  // TODO: ¿¿enviar correo??
+
+  return NextResponse.json(
+    {
+      success: true,
+      data: order,
+    },
+    {
+      status: 200,
+    }
+  );
+}
