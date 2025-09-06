@@ -4,7 +4,24 @@ import { NextResponse } from "next/server";
 export async function GET() {
   const giveaways = await getGiveaways();
 
-  const tempGiveaways = {
+  type Giveaway = {
+    id: number;
+    entries: {
+      userId: number;
+      tickets: number;
+      name: string;
+      profileImage: string;
+    }[];
+    winners: { id: number; name: string; profileImage: string }[];
+    cost: number;
+    title: string;
+    image: string;
+    start_at: number;
+    end_at: number;
+    winner: number;
+  };
+
+  const tempGiveaways: { actual: Giveaway[]; past: Giveaway[] } = {
     actual: [],
     past: [],
   };
