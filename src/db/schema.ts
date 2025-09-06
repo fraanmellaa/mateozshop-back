@@ -1,4 +1,4 @@
-import { integer, text, pgTable, jsonb } from "drizzle-orm/pg-core";
+import { integer, text, pgTable } from "drizzle-orm/pg-core";
 
 /*
   npx drizzle-kit generate   
