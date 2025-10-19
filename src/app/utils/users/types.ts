@@ -1,7 +1,8 @@
 export type User = {
   id: number;
   username: string;
-  kick_id: string;
+  discord_id: string;
+  kick_id: string | null;
   image: string;
   email: string;
   total_points: number;

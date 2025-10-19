@@ -16,11 +16,11 @@ export const getUsers = async () => {
   return usersArray;
 };
 
-export const getUserByKickId = async (kickId: string) => {
+export const getUserByDiscordId = async (discordId: string) => {
   const resUser = await db
     .select()
     .from(users)
-    .where(eq(users.kick_id, kickId));
+    .where(eq(users.discord_id, discordId.toString()));
 
   const userData = resUser.length ? resUser[0] : null;
 
@@ -71,7 +71,8 @@ export const createUser = async (user: {
     .insert(users)
     .values({
       username: user.name,
-      kick_id: user.user_id.toString(),
+      discord_id: user.user_id.toString(),
+      kick_id: null,
       image: user.profile_picture,
       email: user.email,
       total_points: 0,

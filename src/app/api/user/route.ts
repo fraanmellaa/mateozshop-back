@@ -1,10 +1,10 @@
-import { getUserByKickId } from "@/app/utils/users";
+import { getUserByDiscordId } from "@/app/utils/users";
 import { NextResponse } from "next/server";
 
 import { z } from "zod";
 
 const bodySchema = z.object({
-  kick_id: z.string(),
+  discord_id: z.string(),
 });
 
 export async function POST(request: Request) {
@@ -22,9 +22,9 @@ export async function POST(request: Request) {
     }
   }
 
-  const { kick_id } = body;
+  const { discord_id } = body;
 
-  const user = await getUserByKickId(kick_id);
+  const user = await getUserByDiscordId(discord_id);
 
   if (!user) {
     return NextResponse.json(

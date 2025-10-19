@@ -8,7 +8,8 @@ import { integer, text, pgTable } from "drizzle-orm/pg-core";
 export const users = pgTable("users", {
   id: integer("id").primaryKey().unique().generatedAlwaysAsIdentity(),
   username: text("username").notNull().unique(),
-  kick_id: text("kick_id").notNull().unique(),
+  discord_id: text("discord_id").notNull().unique(),
+  kick_id: text("kick_id"),
   image: text("image").notNull(),
   email: text("email").notNull().unique(),
   total_points: integer("total_points").notNull().default(0),

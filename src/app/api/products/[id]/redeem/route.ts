@@ -1,5 +1,5 @@
 import { getProductById } from "@/app/utils/products";
-import { getUserByKickId } from "@/app/utils/users";
+import { getUserByDiscordId } from "@/app/utils/users";
 import { db } from "@/db/drizzle";
 import { orders, products, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -34,7 +34,7 @@ export async function POST(
 
   const { user_id } = body;
 
-  const user = await getUserByKickId(user_id);
+  const user = await getUserByDiscordId(user_id);
 
   if (!user) {
     return NextResponse.json(
@@ -69,6 +69,13 @@ export async function POST(
   }
 
   const userKickId = user.kick_id;
+
+  if (!userKickId) {
+    return NextResponse.json(
+      { success: false, error: "USER_KICK_ID_NOT_FOUND" },
+      { status: 404 }
+    );
+  }
 
   let order;
   try {

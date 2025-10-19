@@ -5,10 +5,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 const bodySchema = z.object({
-  username: z.string().min(3).max(100),
-  kick_id: z.string().min(3).max(100),
+  name: z.string().min(3).max(100),
+  discord_id: z.string().min(3).max(100),
   email: z.email(),
-  image: z.string(),
+  avatar: z.string(),
 });
 
 export async function POST(request: NextRequest) {
@@ -30,9 +30,9 @@ export async function POST(request: NextRequest) {
   }
 
   const user = await createUser({
-    name: body.username,
-    user_id: body.kick_id,
-    profile_picture: body.image,
+    name: body.name,
+    user_id: body.discord_id,
+    profile_picture: body.avatar,
     email: body.email,
   });
 

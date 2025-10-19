@@ -1,6 +1,6 @@
 import { getUserOrders } from "@/app/utils/orders";
 
-import { getUserByKickId } from "@/app/utils/users";
+import { getUserByDiscordId } from "@/app/utils/users";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(
@@ -8,9 +8,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const resolvedParams = await params;
-  const kick_id = resolvedParams.id;
+  const discord_id = resolvedParams.id;
 
-  const user = await getUserByKickId(kick_id);
+  const user = await getUserByDiscordId(discord_id);
 
   if (!user) {
     return NextResponse.json(
