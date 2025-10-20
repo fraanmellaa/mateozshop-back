@@ -1,39 +1,56 @@
 import { NextResponse } from "next/server";
 
 import { getUserIdByUsername } from "../../utils";
-import { updateTotalPoints } from "@/app/utils/users";
+import { updateTotalPoints, updateUserKickId } from "@/app/utils/users";
 
 export async function POST(request: Request) {
   const body = await request.json();
 
-  const isBotRix = body.sender?.username === "BotRix";
-
-  if (!isBotRix)
-    return NextResponse.json(
-      {
-        message: "Webhook ignored, not from BotRix",
-      },
-      {
-        status: 200,
-      }
-    );
-
   const message = body.content;
 
+  const verifyMatch = message.match(/!verificar(?:\s+([A-Za-z0-9_-]+))?/i);
+  if (verifyMatch) {
+    // quedarse con el codigo, reemplazar !verificar por cadena vacia y trim
+    const code = verifyMatch[1] ? verifyMatch[1].trim() : null;
+
+    const userKickId = await getUserIdByUsername(body.sender?.username || "");
+
+    await updateUserKickId(code ? parseInt(code, 10) : 0, userKickId);
+
+    return NextResponse.json(
+      { message: "Comando verificar recibido", code },
+      { status: 200 }
+    );
+  }
+
   const pointsMatch = message.match(/tiene (\d+) puntos/);
-  const points = pointsMatch ? parseInt(pointsMatch[1], 10) : 0;
+  if (pointsMatch) {
+    const isBotRix = body.sender?.username === "BotRix";
+    if (!isBotRix) {
+      return NextResponse.json(
+        {
+          message: "Webhook ignored, not from BotRix",
+        },
+        {
+          status: 200,
+        }
+      );
+    }
 
-  const usernameMatch = message.match(/@(\w+)/);
-  const username = usernameMatch ? usernameMatch[1] : null;
+    const points = pointsMatch ? parseInt(pointsMatch[1], 10) : 0;
 
-  const userKickId = await getUserIdByUsername(username);
+    const usernameMatch = message.match(/@(\w+)/);
+    const username = usernameMatch ? usernameMatch[1] : null;
 
-  await updateTotalPoints(userKickId, points);
+    const userKickId = await getUserIdByUsername(username);
 
-  return NextResponse.json({
-    message: "Webhook received successfully",
-    points: points,
-  });
+    await updateTotalPoints(userKickId, points);
+
+    return NextResponse.json({
+      message: "Webhook received successfully",
+      points: points,
+    });
+  }
 }
 
 /*

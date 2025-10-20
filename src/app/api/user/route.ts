@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 const bodySchema = z.object({
-  discord_id: z.string(),
+  discord_id: z.number(),
 });
 
 export async function POST(request: Request) {
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
 
   const { discord_id } = body;
 
-  const user = await getUserByDiscordId(discord_id);
+  const user = await getUserByDiscordId(discord_id.toString());
 
   if (!user) {
     return NextResponse.json(

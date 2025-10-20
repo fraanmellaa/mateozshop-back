@@ -20,7 +20,7 @@ export const getUserByDiscordId = async (discordId: string) => {
   const resUser = await db
     .select()
     .from(users)
-    .where(eq(users.discord_id, discordId.toString()));
+    .where(eq(users.discord_id, discordId));
 
   const userData = resUser.length ? resUser[0] : null;
 
@@ -103,4 +103,19 @@ export const createUser = async (user: {
     ...createdUser[0],
     actual_points: 0,
   };
+};
+
+export const updateUserKickId = async (
+  verification_code: number,
+  kickId: string
+) => {
+  const updatedUser = await db
+    .update(users)
+    .set({
+      kick_id: kickId,
+    })
+    .where(eq(users.verification_code, verification_code))
+    .returning();
+
+  return updatedUser.length ? updatedUser[0] : null;
 };

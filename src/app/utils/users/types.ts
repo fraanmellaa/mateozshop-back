@@ -7,6 +7,7 @@ export type User = {
   email: string;
   total_points: number;
   used_points: number;
+  verification_code: number;
   actual_points: number; // Calculated as total_points - used_points
   created_at: string; // ISO date string
 };
