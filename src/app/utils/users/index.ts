@@ -86,7 +86,7 @@ export const createUser = async (user: {
     const existingUser = await db
       .select()
       .from(users)
-      .where(eq(users.kick_id, user.user_id));
+      .where(eq(users.discord_id, user.user_id));
 
     if (existingUser.length > 0) {
       return {

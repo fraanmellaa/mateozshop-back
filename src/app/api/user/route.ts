@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 const bodySchema = z.object({
-  discord_id: z.number(),
+  discord_id: z.string(),
 });
 
 export async function POST(request: Request) {
