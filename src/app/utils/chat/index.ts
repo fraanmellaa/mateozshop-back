@@ -2,14 +2,10 @@
 
 import { getAccessToken } from "@/app/api/utils";
 
-export async function sendKickBotMessage(
-  message: string,
-  reply_message_id: string
-): Promise<void> {
+export async function sendKickBotMessage(message: string): Promise<void> {
   const endpoint = "https://api.kick.com/public/v1/chat";
   const payload: Record<string, unknown> = {
     content: message,
-    reply_to_message_id: reply_message_id,
     type: "bot",
   };
 
