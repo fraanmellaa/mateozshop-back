@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getUserIdByUsername } from "../../utils";
 import { updateTotalPoints, updateUserKickId } from "@/app/utils/users";
+import { sendKickBotMessage } from "@/app/utils/chat";
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -16,6 +17,11 @@ export async function POST(request: Request) {
     const userKickId = await getUserIdByUsername(body.sender?.username || "");
 
     await updateUserKickId(code ? parseInt(code, 10) : 0, userKickId);
+
+    await sendKickBotMessage(
+      `@${body.sender?.username} ¡Tu cuenta ha sido verificada con éxito!`,
+      body.message_id
+    );
 
     return NextResponse.json(
       { message: "Comando verificar recibido", code },
