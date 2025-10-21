@@ -41,6 +41,15 @@ export const getAppAccessToken = async () => {
 };
 
 export const getAccessToken = async () => {
+  const cacheKey = "kick_access_token";
+  const cached = await kvGet(cacheKey);
+  if (cached) {
+    const expires_in = cached.expires_in;
+    const created_at = cached.created_at;
+    if (Date.now() < created_at + expires_in * 1000) {
+      return cached.token;
+    }
+  }
   const refresh_token = await kvGet("kick_refresh_token");
 
   const res = await fetch(`https://id.kick.com/oauth/token`, {
@@ -49,9 +58,9 @@ export const getAccessToken = async () => {
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: new URLSearchParams({
-      client_id: process.env.NEXT_PUBLIC_KICK_CLIENT_ID || "",
-      client_secret: process.env.KICK_CLIENT_SECRET || "",
-      refresh_token: refresh_token || "",
+      client_id: process.env.NEXT_PUBLIC_KICK_CLIENT_ID!,
+      client_secret: process.env.KICK_CLIENT_SECRET!,
+      refresh_token: refresh_token.token,
       grant_type: "refresh_token",
     }),
   });
@@ -62,8 +71,14 @@ export const getAccessToken = async () => {
 
   const data = await res.json();
 
-  await kvPut("kick_access_token", data.access_token);
-  await kvPut("kick_refresh_token", data.refresh_token);
+  await kvPut("kick_access_token", {
+    access_token: data.access_token,
+    expires_in: data.expires_in,
+    created_at: Date.now(),
+  });
+  await kvPut("kick_refresh_token", {
+    token: data.refresh_token,
+  });
 
   return data.access_token;
 };
