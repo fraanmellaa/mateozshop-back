@@ -1,6 +1,6 @@
 "use server";
 
-import { getAppAccessToken } from "@/app/api/utils";
+import { getAccessToken } from "@/app/api/utils";
 
 export async function sendKickBotMessage(
   message: string,
@@ -13,7 +13,7 @@ export async function sendKickBotMessage(
     type: "bot",
   };
 
-  const authToken = await getAppAccessToken();
+  const authToken = await getAccessToken();
 
   await fetch(endpoint, {
     method: "POST",

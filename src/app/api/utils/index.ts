@@ -40,6 +40,34 @@ export const getAppAccessToken = async () => {
   return data.access_token;
 };
 
+export const getAccessToken = async () => {
+  const refresh_token = await kvGet("kick_refresh_token");
+
+  const res = await fetch(`https://id.kick.com/oauth/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      client_id: process.env.NEXT_PUBLIC_KICK_CLIENT_ID || "",
+      client_secret: process.env.KICK_CLIENT_SECRET || "",
+      refresh_token: refresh_token || "",
+      grant_type: "refresh_token",
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to refresh access token");
+  }
+
+  const data = await res.json();
+
+  await kvPut("kick_access_token", data.access_token);
+  await kvPut("kick_refresh_token", data.refresh_token);
+
+  return data.access_token;
+};
+
 export const getUserIdByUsername = async (username: string) => {
   const appAccessToken = await getAppAccessToken();
 
