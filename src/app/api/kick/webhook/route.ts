@@ -51,11 +51,20 @@ export async function POST(request: Request) {
 
     await updateTotalPoints(userKickId, points);
 
+    await sendKickBotMessage(
+      `@${username} se han actualizado tus puntos, si no te aparecen en la web, pulsa el botón de refrescar al lado de los puntos.`
+    );
+
     return NextResponse.json({
       message: "Webhook received successfully",
       points: points,
     });
   }
+
+  return NextResponse.json(
+    { message: "No recognized command in the message" },
+    { status: 200 }
+  );
 }
 
 /*
