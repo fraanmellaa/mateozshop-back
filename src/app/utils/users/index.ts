@@ -119,3 +119,21 @@ export const updateUserKickId = async (
 
   return updatedUser.length ? updatedUser[0] : null;
 };
+
+export const getUserById = async (userId: number) => {
+  const resUser = await db.select().from(users).where(eq(users.id, userId));
+
+  const userData = resUser.length ? resUser[0] : null;
+
+  if (!userData) {
+    return null;
+  }
+
+  const plainUserData: User = {
+    ...userData,
+    actual_points: userData.total_points - userData.used_points,
+    created_at: new Date(userData.created_at * 1000).toISOString(),
+  };
+
+  return plainUserData;
+};

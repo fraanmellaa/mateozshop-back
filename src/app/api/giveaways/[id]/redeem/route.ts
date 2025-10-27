@@ -1,14 +1,15 @@
+import { getGiveawayById } from "@/app/utils/giveaways";
 import { getProductById } from "@/app/utils/products";
 import { getUserByDiscordId } from "@/app/utils/users";
 import { db } from "@/db/drizzle";
-import { orders, products, users } from "@/db/schema";
+import { giveaways_entries, orders, products, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
 import { z } from "zod";
 
 const bodySchema = z.object({
-  user_id: z.string(),
+  discord_id: z.string(),
 });
 
 export async function POST(
@@ -32,9 +33,9 @@ export async function POST(
     }
   }
 
-  const { user_id } = body;
+  const { discord_id } = body;
 
-  const user = await getUserByDiscordId(user_id);
+  const user = await getUserByDiscordId(discord_id);
 
   if (!user) {
     return NextResponse.json(
@@ -52,7 +53,7 @@ export async function POST(
     );
   }
 
-  const product = await getProductById(parseInt(product_id));
+  const product = await getGiveawayById(parseInt(product_id));
 
   if (!product) {
     return NextResponse.json(
@@ -61,7 +62,7 @@ export async function POST(
     );
   }
 
-  if (actualPoints < product.price) {
+  if (actualPoints < product.cost) {
     return NextResponse.json(
       { success: false, error: "NOT_ENOUGH_POINTS" },
       { status: 400 }
@@ -80,7 +81,7 @@ export async function POST(
   let order;
   try {
     await db.transaction(async (tx) => {
-      const newUsedPoints = user.used_points + product.price;
+      const newUsedPoints = user.used_points + product.cost;
       await tx
         .update(users)
         .set({
@@ -90,20 +91,15 @@ export async function POST(
         .returning();
 
       order = await tx
-        .insert(orders)
+        .insert(giveaways_entries)
         .values({
           user_id: user.id,
-          product_id: product.id,
-          status: 0, // 0: pending
-          total: product.price,
-          created_at: Math.floor(Date.now() / 1000), // Timestamp in seconds
+          giveaway_id: product.id,
         })
-        .returning();
+        .returning()
+        .then((res) => res[0]);
 
-      await db
-        .update(products)
-        .set({ stock: product.stock - 1 })
-        .where(eq(products.id, product.id));
+      return order;
     });
   } catch (error) {
     console.error("Error creating order:", error);

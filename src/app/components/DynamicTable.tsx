@@ -33,14 +33,16 @@ import {
 } from "@/components/ui/table";
 import { User } from "../utils/users/types";
 
-export function DynamicTable({
+export function DynamicTable<T = User>({
   columns,
   data,
   filter,
+  searchPlaceholder = "Filtrar...",
 }: {
-  columns: ColumnDef<User>[];
-  data: User[];
-  filter: { value: string; text: string };
+  columns: ColumnDef<T>[];
+  data: T[];
+  filter?: { value: string; text: string };
+  searchPlaceholder?: string;
 }) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
@@ -74,16 +76,28 @@ export function DynamicTable({
   return (
     <div className="w-full">
       <div className="flex items-center py-4">
-        <Input
-          placeholder={`Filtrar por ${filter.text} ...`}
-          value={
-            (table.getColumn(filter.value)?.getFilterValue() as string) ?? ""
-          }
-          onChange={(event) =>
-            table.getColumn(filter.value)?.setFilterValue(event.target.value)
-          }
-          className="max-w-sm"
-        />
+        {filter && (
+          <Input
+            placeholder={`Filtrar por ${filter.text} ...`}
+            value={
+              (table.getColumn(filter.value)?.getFilterValue() as string) ?? ""
+            }
+            onChange={(event) =>
+              table.getColumn(filter.value)?.setFilterValue(event.target.value)
+            }
+            className="max-w-sm"
+          />
+        )}
+        {!filter && searchPlaceholder && (
+          <Input
+            placeholder={searchPlaceholder}
+            value={(table.getColumn("email")?.getFilterValue() as string) ?? ""}
+            onChange={(event) =>
+              table.getColumn("email")?.setFilterValue(event.target.value)
+            }
+            className="max-w-sm"
+          />
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" className="ml-auto">

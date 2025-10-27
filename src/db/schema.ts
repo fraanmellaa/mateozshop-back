@@ -1,4 +1,4 @@
-import { integer, text, pgTable } from "drizzle-orm/pg-core";
+import { integer, text, pgTable, jsonb, boolean } from "drizzle-orm/pg-core";
 
 /*
   npx drizzle-kit generate   
@@ -25,6 +25,9 @@ export const products = pgTable("products", {
   image: text("image").notNull(),
   price: integer("price").notNull(),
   stock: integer("stock").notNull().default(0),
+  codes: jsonb("codes").notNull().default("[]").$type<string[]>(),
+  used_codes: jsonb("used_codes").notNull().default("[]").$type<string[]>(),
+  sendable: boolean("sendable").notNull().default(false),
   created_at: integer("created_at").notNull(),
 });
 
@@ -44,12 +47,10 @@ export const giveaways = pgTable("giveaways", {
   image: text("image").notNull(),
   start_at: integer("start_at").notNull(),
   end_at: integer("end_at").notNull(),
-  winner: integer("winner")
-    .notNull()
-    .references(() => users.id, {
-      onDelete: "cascade",
-      onUpdate: "cascade",
-    }),
+  winner: integer("winner").references(() => users.id, {
+    onDelete: "set null",
+    onUpdate: "cascade",
+  }),
 });
 
 export const giveaways_entries = pgTable("giveaways_entries", {

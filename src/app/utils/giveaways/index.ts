@@ -137,3 +137,68 @@ export const getGiveawayById = async (id: number) => {
     winners,
   };
 };
+
+export const getUserGiveaways = async (userId: number) => {
+  const now = Math.floor(Date.now() / 1000);
+
+  // Obtener todos los sorteos en los que el usuario tiene entradas
+  const userGiveaways = await db
+    .select({
+      giveaway: {
+        id: giveaways.id,
+        title: giveaways.title,
+        image: giveaways.image,
+        start_at: giveaways.start_at,
+        end_at: giveaways.end_at,
+        winner: giveaways.winner,
+        cost: giveaways.cost,
+      },
+      tickets: count(giveaways_entries.user_id),
+    })
+    .from(giveaways_entries)
+    .innerJoin(giveaways, eq(giveaways_entries.giveaway_id, giveaways.id))
+    .where(eq(giveaways_entries.user_id, userId))
+    .groupBy(
+      giveaways.id,
+      giveaways.title,
+      giveaways.image,
+      giveaways.start_at,
+      giveaways.end_at,
+      giveaways.winner,
+      giveaways.cost
+    )
+    .execute();
+
+  // Decorar con el estado del sorteo
+  const decoratedGiveaways = userGiveaways.map((item) => {
+    const giveaway = item.giveaway;
+    let status: string;
+    let isWinner = false;
+
+    if (giveaway.start_at > now) {
+      status = "upcoming"; // Próximo
+    } else if (giveaway.end_at > now) {
+      status = "active"; // Activo
+    } else if (giveaway.winner) {
+      status = "finished"; // Finalizado
+      isWinner = giveaway.winner === userId;
+    } else {
+      status = "pending"; // Esperando sorteo
+    }
+
+    return {
+      id: giveaway.id,
+      title: giveaway.title,
+      image: giveaway.image,
+      cost: giveaway.cost,
+      status,
+      tickets: item.tickets,
+      isWinner,
+      start_at: giveaway.start_at,
+      end_at: giveaway.end_at,
+      created_at: new Date(giveaway.start_at * 1000).toISOString(),
+    };
+  });
+
+  return decoratedGiveaways;
+};

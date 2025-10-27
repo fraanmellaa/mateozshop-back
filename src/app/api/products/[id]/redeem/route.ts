@@ -1,3 +1,4 @@
+import { sendEmail } from "@/app/utils/email";
 import { getProductById } from "@/app/utils/products";
 import { getUserByDiscordId } from "@/app/utils/users";
 import { db } from "@/db/drizzle";
@@ -8,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 const bodySchema = z.object({
-  user_id: z.string(),
+  discord_id: z.string(),
 });
 
 export async function POST(
@@ -32,9 +33,9 @@ export async function POST(
     }
   }
 
-  const { user_id } = body;
+  const { discord_id } = body;
 
-  const user = await getUserByDiscordId(user_id);
+  const user = await getUserByDiscordId(discord_id);
 
   if (!user) {
     return NextResponse.json(
@@ -100,7 +101,7 @@ export async function POST(
         })
         .returning();
 
-      await db
+      await tx
         .update(products)
         .set({ stock: product.stock - 1 })
         .where(eq(products.id, product.id));
@@ -113,7 +114,23 @@ export async function POST(
     );
   }
 
-  // TODO: ¿¿enviar correo??
+  const email = user.email;
+
+  if (product.sendable && email) {
+    const firstCode = product.codes.length ? product.codes[0] : undefined;
+    await sendEmail(email, "PRODUCT_WITH_REWARD", firstCode);
+    const newCodes = product.codes.filter((code) => code !== firstCode);
+    const updatedUsedCodes = [...product.used_codes, firstCode!];
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(products)
+        .set({ codes: newCodes, used_codes: updatedUsedCodes })
+        .where(eq(products.id, product.id));
+    });
+  } else {
+    await sendEmail(email, "PRODUCT_NO_REWARD");
+  }
 
   return NextResponse.json(
     {
