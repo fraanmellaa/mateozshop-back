@@ -43,14 +43,15 @@ export default function PageBody({ users }: { users: User[] }) {
     if (!selectedUser) return;
 
     try {
-      // Enviar comando para añadir puntos
-      const message = `!points add @${selectedUser.username} ${points}`;
+      // Enviar comando para añadir puntos usando kick_username
+      const kickUsername = selectedUser.kick_username || selectedUser.username;
+      const message = `!points add @${kickUsername} ${points}`;
       await sendKickBotMessage(message);
 
-      console.log(`Added ${points} points to user ${selectedUser.username}`);
+      console.log(`Added ${points} points to user ${kickUsername}`);
 
       // Mostrar mensaje de éxito (opcional)
-      // alert(`Puntos añadidos exitosamente a ${selectedUser.username}`);
+      // alert(`Puntos añadidos exitosamente a ${kickUsername}`);
 
       // Refresh la página después de la acción
       router.refresh();
@@ -64,16 +65,15 @@ export default function PageBody({ users }: { users: User[] }) {
     if (!selectedUser) return;
 
     try {
-      // Enviar comando para quitar puntos (cantidad negativa)
-      const message = `!points add @${selectedUser.username} -${points}`;
+      // Enviar comando para quitar puntos usando kick_username
+      const kickUsername = selectedUser.kick_username || selectedUser.username;
+      const message = `!points add @${kickUsername} -${points}`;
       await sendKickBotMessage(message);
 
-      console.log(
-        `Removed ${points} points from user ${selectedUser.username}`
-      );
+      console.log(`Removed ${points} points from user ${kickUsername}`);
 
       // Mostrar mensaje de éxito (opcional)
-      // alert(`Puntos removidos exitosamente de ${selectedUser.username}`);
+      // alert(`Puntos removidos exitosamente de ${kickUsername}`);
 
       // Refresh la página después de la acción
       router.refresh();
@@ -87,14 +87,18 @@ export default function PageBody({ users }: { users: User[] }) {
     if (!selectedUser) return;
 
     try {
-      // Enviar comando para resetear puntos a 0
-      const message = `!points set @${selectedUser.username} 0`;
+      // Enviar comando para resetear puntos usando el total de puntos en negativo
+      const kickUsername = selectedUser.kick_username || selectedUser.username;
+      const totalPoints = selectedUser.total_points;
+      const message = `!points add @${kickUsername} -${totalPoints}`;
       await sendKickBotMessage(message);
 
-      console.log(`Reset points for user ${selectedUser.username}`);
+      console.log(
+        `Reset points for user ${kickUsername} (removed ${totalPoints} total points)`
+      );
 
       // Mostrar mensaje de éxito (opcional)
-      // alert(`Puntos reseteados exitosamente para ${selectedUser.username}`);
+      // alert(`Puntos reseteados exitosamente para ${kickUsername}`);
 
       // Refresh la página después de la acción
       router.refresh();
@@ -253,7 +257,7 @@ export default function PageBody({ users }: { users: User[] }) {
           setSelectedUser(null);
         }}
         onConfirm={handleAddPoints}
-        username={selectedUser?.username || ""}
+        username={selectedUser?.kick_username || selectedUser?.username || ""}
       />
 
       <RemovePointsModal
@@ -263,7 +267,7 @@ export default function PageBody({ users }: { users: User[] }) {
           setSelectedUser(null);
         }}
         onConfirm={handleRemovePoints}
-        username={selectedUser?.username || ""}
+        username={selectedUser?.kick_username || selectedUser?.username || ""}
         currentPoints={selectedUser?.actual_points || 0}
       />
 
@@ -274,7 +278,7 @@ export default function PageBody({ users }: { users: User[] }) {
           setSelectedUser(null);
         }}
         onConfirm={handleResetPoints}
-        username={selectedUser?.username || ""}
+        username={selectedUser?.kick_username || selectedUser?.username || ""}
         currentPoints={selectedUser?.actual_points || 0}
       />
     </>

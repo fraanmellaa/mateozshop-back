@@ -90,12 +90,16 @@ export async function POST(
         .where(eq(users.kick_id, userKickId.toString()))
         .returning();
 
+      // Si el producto es sendable, crear el pedido como completado (estado 1)
+      // Si no es sendable, crear como pendiente (estado 0)
+      const orderStatus = product.sendable ? 1 : 0;
+
       order = await tx
         .insert(orders)
         .values({
           user_id: user.id,
           product_id: product.id,
-          status: 0, // 0: pending
+          status: orderStatus,
           total: product.price,
           created_at: Math.floor(Date.now() / 1000), // Timestamp in seconds
         })
@@ -119,7 +123,7 @@ export async function POST(
   if (product.sendable && email) {
     const firstCode = product.codes.length ? product.codes[0] : undefined;
     await sendEmail(email, "PRODUCT_WITH_REWARD", firstCode);
-    const newCodes = product.codes.filter((code) => code !== firstCode);
+    const newCodes = product.codes.filter((code: string) => code !== firstCode);
     const updatedUsedCodes = [...product.used_codes, firstCode!];
 
     await db.transaction(async (tx) => {

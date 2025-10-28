@@ -1,10 +1,24 @@
 "use client";
 
+import { useState } from "react";
 import { OrderDetail as OrderDetailType } from "@/app/utils/orders/types";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, User, Package, Calendar, CreditCard } from "lucide-react";
+import {
+  ArrowLeft,
+  User,
+  Package,
+  Calendar,
+  CreditCard,
+  Settings,
+  Mail,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import ChangeOrderStatusModal from "./ChangeOrderStatusModal";
+import SendEmailModal from "./SendEmailModal";
+import { updateOrderStatus } from "@/app/utils/orders/actions";
+import { sendOrderEmail } from "@/app/utils/orders/actions";
+import { toast } from "sonner";
 
 interface OrderDetailProps {
   order: OrderDetailType;
@@ -12,6 +26,40 @@ interface OrderDetailProps {
 
 export default function OrderDetail({ order }: OrderDetailProps) {
   const router = useRouter();
+  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [currentOrder, setCurrentOrder] = useState(order);
+
+  const handleStatusChange = async (newStatus: number) => {
+    try {
+      const result = await updateOrderStatus(currentOrder.id, newStatus);
+      if (result.success) {
+        setCurrentOrder({ ...currentOrder, status: newStatus });
+        toast.success("Estado del pedido actualizado correctamente");
+      } else {
+        toast.error(result.error || "Error al actualizar el estado");
+      }
+    } catch {
+      toast.error("Error al actualizar el estado del pedido");
+    }
+  };
+
+  const handleSendEmail = async (subject: string, message: string) => {
+    try {
+      const result = await sendOrderEmail(
+        currentOrder.user.email,
+        subject,
+        message
+      );
+      if (result.success) {
+        toast.success("Email enviado correctamente");
+      } else {
+        toast.error(result.error || "Error al enviar el email");
+      }
+    } catch {
+      toast.error("Error al enviar el email");
+    }
+  };
 
   const getStatusInfo = (status: number) => {
     switch (status) {
@@ -42,8 +90,8 @@ export default function OrderDetail({ order }: OrderDetailProps) {
     }
   };
 
-  const statusInfo = getStatusInfo(order.status);
-  const orderDate = new Date(order.created_at);
+  const statusInfo = getStatusInfo(currentOrder.status);
+  const orderDate = new Date(currentOrder.created_at);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -80,7 +128,9 @@ export default function OrderDetail({ order }: OrderDetailProps) {
             <label className="text-sm font-medium text-muted-foreground">
               ID del Pedido
             </label>
-            <p className="text-lg font-mono text-foreground">#{order.id}</p>
+            <p className="text-lg font-mono text-foreground">
+              #{currentOrder.id}
+            </p>
           </div>
           <div>
             <label className="text-sm font-medium text-muted-foreground">
@@ -101,7 +151,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
               Total
             </label>
             <p className="text-lg font-semibold text-foreground">
-              {order.total} puntos
+              {currentOrder.total} puntos
             </p>
           </div>
         </div>
@@ -124,8 +174,8 @@ export default function OrderDetail({ order }: OrderDetailProps) {
 
         <div className="flex items-start gap-4">
           <Image
-            src={order.user.image}
-            alt={order.user.username}
+            src={currentOrder.user.image}
+            alt={currentOrder.user.username}
             width={64}
             height={64}
             className="rounded-full"
@@ -135,20 +185,24 @@ export default function OrderDetail({ order }: OrderDetailProps) {
               <label className="text-sm font-medium text-muted-foreground">
                 Nombre de Usuario
               </label>
-              <p className="text-lg text-foreground">{order.user.username}</p>
+              <p className="text-lg text-foreground">
+                {currentOrder.user.username}
+              </p>
             </div>
             <div>
               <label className="text-sm font-medium text-muted-foreground">
                 Email
               </label>
-              <p className="text-lg text-foreground">{order.user.email}</p>
+              <p className="text-lg text-foreground">
+                {currentOrder.user.email}
+              </p>
             </div>
             <div>
               <label className="text-sm font-medium text-muted-foreground">
                 Discord ID
               </label>
               <p className="text-lg font-mono text-foreground">
-                {order.user.discord_id}
+                {currentOrder.user.discord_id}
               </p>
             </div>
             <div>
@@ -156,7 +210,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
                 Kick ID
               </label>
               <p className="text-lg font-mono text-foreground">
-                {order.user.kick_id || "No disponible"}
+                {currentOrder.user.kick_id || "No disponible"}
               </p>
             </div>
           </div>
@@ -165,7 +219,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
         <div className="mt-4">
           <Button
             variant="outline"
-            onClick={() => router.push(`/users/${order.user.id}`)}
+            onClick={() => router.push(`/users/${currentOrder.user.id}`)}
             className="flex items-center gap-2"
           >
             <User className="h-4 w-4" />
@@ -179,7 +233,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
               Total de Puntos
             </p>
             <p className="text-lg font-semibold text-blue-400">
-              {order.user.total_points}
+              {currentOrder.user.total_points}
             </p>
           </div>
           <div className="text-center">
@@ -187,7 +241,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
               Puntos Usados
             </p>
             <p className="text-lg font-semibold text-red-400">
-              {order.user.used_points}
+              {currentOrder.user.used_points}
             </p>
           </div>
           <div className="text-center">
@@ -195,7 +249,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
               Puntos Disponibles
             </p>
             <p className="text-lg font-semibold text-green-400">
-              {order.user.available_points}
+              {currentOrder.user.available_points}
             </p>
           </div>
         </div>
@@ -210,8 +264,8 @@ export default function OrderDetail({ order }: OrderDetailProps) {
 
         <div className="flex items-start gap-6">
           <Image
-            src={order.product.image}
-            alt={order.product.name}
+            src={currentOrder.product.image}
+            alt={currentOrder.product.name}
             width={120}
             height={120}
             className="rounded-lg object-cover"
@@ -219,10 +273,10 @@ export default function OrderDetail({ order }: OrderDetailProps) {
           <div className="flex-1 space-y-3">
             <div>
               <h3 className="text-xl font-semibold text-foreground">
-                {order.product.name}
+                {currentOrder.product.name}
               </h3>
               <p className="text-muted-foreground mt-1">
-                {order.product.description}
+                {currentOrder.product.description}
               </p>
             </div>
 
@@ -232,7 +286,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
                   Precio
                 </label>
                 <p className="text-lg font-semibold text-foreground">
-                  {order.product.price} puntos
+                  {currentOrder.product.price} puntos
                 </p>
               </div>
               <div>
@@ -240,7 +294,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
                   Stock Disponible
                 </label>
                 <p className="text-lg text-foreground">
-                  {order.product.stock} unidades
+                  {currentOrder.product.stock} unidades
                 </p>
               </div>
               <div>
@@ -248,7 +302,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
                   Envío
                 </label>
                 <p className="text-lg text-foreground">
-                  {order.product.sendable ? (
+                  {currentOrder.product.sendable ? (
                     <span className="text-green-600">✓ Envío automático</span>
                   ) : (
                     <span className="text-gray-600">Manual</span>
@@ -257,6 +311,36 @@ export default function OrderDetail({ order }: OrderDetailProps) {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Acciones de Administrador */}
+      <div className="bg-card rounded-lg border border-border shadow-sm p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Settings className="h-5 w-5 text-muted-foreground" />
+          <h2 className="text-lg font-semibold text-foreground">
+            Acciones de Administrador
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Button
+            onClick={() => setIsStatusModalOpen(true)}
+            variant="outline"
+            className="flex items-center gap-2 h-12"
+          >
+            <Settings className="h-4 w-4" />
+            Cambiar Estado del Pedido
+          </Button>
+
+          <Button
+            onClick={() => setIsEmailModalOpen(true)}
+            variant="outline"
+            className="flex items-center gap-2 h-12"
+          >
+            <Mail className="h-4 w-4" />
+            Enviar Email al Usuario
+          </Button>
         </div>
       </div>
 
@@ -286,7 +370,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
             </div>
           </div>
 
-          {order.status >= 1 && (
+          {currentOrder.status >= 1 && (
             <div className="flex items-center gap-3 p-3 bg-green-500/20 rounded-md">
               <div className="w-2 h-2 bg-green-500 rounded-full"></div>
               <div>
@@ -298,7 +382,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
             </div>
           )}
 
-          {order.status === 2 && (
+          {currentOrder.status === 2 && (
             <div className="flex items-center gap-3 p-3 bg-red-500/20 rounded-md">
               <div className="w-2 h-2 bg-red-500 rounded-full"></div>
               <div>
@@ -311,6 +395,23 @@ export default function OrderDetail({ order }: OrderDetailProps) {
           )}
         </div>
       </div>
+
+      {/* Modales */}
+      <ChangeOrderStatusModal
+        isOpen={isStatusModalOpen}
+        onClose={() => setIsStatusModalOpen(false)}
+        onConfirm={handleStatusChange}
+        currentStatus={currentOrder.status}
+        orderId={currentOrder.id}
+      />
+
+      <SendEmailModal
+        isOpen={isEmailModalOpen}
+        onClose={() => setIsEmailModalOpen(false)}
+        onSend={handleSendEmail}
+        userEmail={currentOrder.user.email}
+        userName={currentOrder.user.username}
+      />
     </div>
   );
 }

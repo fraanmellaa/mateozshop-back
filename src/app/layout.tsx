@@ -4,6 +4,7 @@ import "./globals.css";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "./components/AppSidebar";
 import { Metadata } from "next";
+import { Toaster } from "sonner";
 
 const poppins = Poppins({
   subsets: ["latin"],
@@ -35,6 +36,7 @@ export default function RootLayout({
             <main className="w-full">{children}</main>
           </SidebarInset>
         </SidebarProvider>
+        <Toaster position="top-right" theme="dark" />
       </body>
     </html>
   );

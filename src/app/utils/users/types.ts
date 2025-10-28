@@ -3,6 +3,7 @@ export type User = {
   username: string;
   discord_id: string;
   kick_id: string | null;
+  kick_username: string | null;
   image: string;
   email: string;
   total_points: number;
