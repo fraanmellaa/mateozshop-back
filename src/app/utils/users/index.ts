@@ -107,12 +107,14 @@ export const createUser = async (user: {
 
 export const updateUserKickId = async (
   verification_code: number,
-  kickId: string
+  kickId: string,
+  kick_username: string
 ) => {
   const updatedUser = await db
     .update(users)
     .set({
       kick_id: kickId,
+      kick_username: kick_username,
     })
     .where(eq(users.verification_code, verification_code))
     .returning();

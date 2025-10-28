@@ -12,6 +12,7 @@ export const users = pgTable("users", {
   kick_id: text("kick_id"),
   image: text("image").notNull(),
   email: text("email").notNull().unique(),
+  kick_username: text("kick_username").unique(),
   total_points: integer("total_points").notNull().default(0),
   used_points: integer("used_points").notNull().default(0),
   created_at: integer("created_at").notNull(),

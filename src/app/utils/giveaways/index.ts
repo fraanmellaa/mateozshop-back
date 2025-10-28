@@ -169,36 +169,56 @@ export const getUserGiveaways = async (userId: number) => {
     )
     .execute();
 
-  // Decorar con el estado del sorteo
-  const decoratedGiveaways = userGiveaways.map((item) => {
-    const giveaway = item.giveaway;
-    let status: string;
-    let isWinner = false;
+  // Para cada sorteo, obtener el total de tickets y calcular probabilidad
+  const decoratedGiveaways = await Promise.all(
+    userGiveaways.map(async (item) => {
+      const giveaway = item.giveaway;
+      let status: string;
+      let isWinner = false;
 
-    if (giveaway.start_at > now) {
-      status = "upcoming"; // Próximo
-    } else if (giveaway.end_at > now) {
-      status = "active"; // Activo
-    } else if (giveaway.winner) {
-      status = "finished"; // Finalizado
-      isWinner = giveaway.winner === userId;
-    } else {
-      status = "pending"; // Esperando sorteo
-    }
+      if (giveaway.start_at > now) {
+        status = "upcoming"; // Próximo
+      } else if (giveaway.end_at > now) {
+        status = "active"; // Activo
+      } else if (giveaway.winner) {
+        status = "finished"; // Finalizado
+        isWinner = giveaway.winner === userId;
+      } else {
+        status = "pending"; // Esperando sorteo
+      }
 
-    return {
-      id: giveaway.id,
-      title: giveaway.title,
-      image: giveaway.image,
-      cost: giveaway.cost,
-      status,
-      tickets: item.tickets,
-      isWinner,
-      start_at: giveaway.start_at,
-      end_at: giveaway.end_at,
-      created_at: new Date(giveaway.start_at * 1000).toISOString(),
-    };
-  });
+      // Obtener el total de tickets para este sorteo
+      const totalTicketsResult = await db
+        .select({
+          totalTickets: count(giveaways_entries.id),
+        })
+        .from(giveaways_entries)
+        .where(eq(giveaways_entries.giveaway_id, giveaway.id))
+        .execute();
+
+      const totalTickets = totalTicketsResult[0]?.totalTickets || 0;
+      const userTickets = item.tickets;
+
+      // Calcular probabilidad de ganar (tickets del usuario / total de tickets)
+      const winProbability =
+        totalTickets > 0 ? (userTickets / totalTickets) * 100 : 0;
+
+      return {
+        id: giveaway.id,
+        title: giveaway.title,
+        image: giveaway.image,
+        cost: giveaway.cost,
+        status,
+        tickets: userTickets,
+        totalTickets,
+        winProbability: Math.round(winProbability * 100) / 100, // Redondear a 2 decimales
+        isWinner,
+        start_at: giveaway.start_at,
+        end_at: giveaway.end_at,
+        created_at: new Date(giveaway.start_at * 1000).toISOString(),
+      };
+    })
+  );
 
   return decoratedGiveaways;
 };

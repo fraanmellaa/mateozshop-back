@@ -16,7 +16,11 @@ export async function POST(request: Request) {
 
     const userKickId = await getUserIdByUsername(body.sender?.username || "");
 
-    await updateUserKickId(code ? parseInt(code, 10) : 0, userKickId);
+    await updateUserKickId(
+      code ? parseInt(code, 10) : 0,
+      userKickId,
+      body.sender?.username
+    );
 
     await sendKickBotMessage(
       `@${body.sender?.username} ¡Tu cuenta ha sido verificada con éxito!`

@@ -47,7 +47,7 @@ export const getAccessToken = async () => {
     const expires_in = cached.expires_in;
     const created_at = cached.created_at;
     if (Date.now() < created_at + expires_in * 1000) {
-      return cached.token;
+      return cached.access_token;
     }
   }
   const refresh_token = await kvGet("kick_refresh_token");
