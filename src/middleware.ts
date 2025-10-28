@@ -10,6 +10,10 @@ export async function middleware(request: NextRequest) {
 
   console.log("🛡️ MIDDLEWARE:", pathname);
 
+  if (pathname.startsWith("/api/kick")) {
+    return NextResponse.next();
+  }
+
   // RUTAS API: Verificar autenticación
   if (pathname.startsWith("/api/")) {
     // Excepción: login no requiere autenticación
