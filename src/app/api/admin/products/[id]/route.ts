@@ -3,6 +3,7 @@ import {
   updateProduct,
   deleteProduct,
   getProductById,
+  ProductRow,
 } from "@/app/utils/products";
 
 export async function GET(
@@ -52,7 +53,7 @@ export async function PUT(
       used_codes,
     } = body;
 
-    const updateData: any = {};
+    const updateData: Partial<ProductRow> = {};
     if (name !== undefined) updateData.name = name;
     if (description !== undefined) updateData.description = description;
     if (image !== undefined) updateData.image = image;

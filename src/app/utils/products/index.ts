@@ -21,7 +21,7 @@ export const getProducts = async (): Promise<ProductRow[]> => {
   const productsData = await db.select().from(products).limit(10000);
 
   // Normalize created_at to number if needed
-  return productsData.map((p: any) => ({
+  return productsData.map((p: ProductRow) => ({
     ...p,
     codes: p.codes || [],
     used_codes: p.used_codes || [],
@@ -90,7 +90,7 @@ export const updateProduct = async (
   }>
 ) => {
   // If sendable set to false, clear codes/used_codes to avoid stale data
-  const toUpdate: any = { ...updatedFields };
+  const toUpdate: Partial<ProductRow> = { ...updatedFields };
   if (updatedFields.sendable === false) {
     toUpdate.codes = [];
     toUpdate.used_codes = [];
@@ -112,7 +112,7 @@ export const getProductById = async (productId: number) => {
     .limit(1)
     .execute();
 
-  const p = product[0] as any;
+  const p = product[0] as ProductRow | undefined;
   if (!p) return null;
 
   return {

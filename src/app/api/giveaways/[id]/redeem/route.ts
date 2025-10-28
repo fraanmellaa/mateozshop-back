@@ -1,8 +1,7 @@
 import { getGiveawayById } from "@/app/utils/giveaways";
-import { getProductById } from "@/app/utils/products";
 import { getUserByDiscordId } from "@/app/utils/users";
 import { db } from "@/db/drizzle";
-import { giveaways_entries, orders, products, users } from "@/db/schema";
+import { giveaways_entries, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
