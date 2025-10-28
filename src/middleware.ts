@@ -10,14 +10,42 @@ export async function middleware(request: NextRequest) {
 
   console.log("🛡️ MIDDLEWARE:", pathname);
 
-  // RUTAS API: Verificar Bearer Token
+  // RUTAS API: Verificar autenticación
   if (pathname.startsWith("/api/")) {
-    // Excepción: login no requiere bearer token
+    // Excepción: login no requiere autenticación
     if (pathname === "/api/auth/login" || pathname === "/api/auth/logout") {
       console.log("🔓 API Login - Sin autenticación");
       return NextResponse.next();
     }
 
+    // RUTAS ADMIN: Usar JWT de cookies (para frontend)
+    if (pathname.startsWith("/api/admin/")) {
+      console.log("🔐 API Admin - Verificando JWT");
+      const token = request.cookies.get("admin-session")?.value;
+
+      if (!token) {
+        console.log("❌ API Admin - Sin JWT");
+        return NextResponse.json(
+          { error: "No autorizado - Sesión requerida" },
+          { status: 401 }
+        );
+      }
+
+      try {
+        const secret = new TextEncoder().encode(JWT_SECRET);
+        await jwtVerify(token, secret);
+        console.log("✅ API Admin - JWT válido");
+        return NextResponse.next();
+      } catch (error) {
+        console.log("❌ API Admin - JWT inválido:", error);
+        return NextResponse.json(
+          { error: "No autorizado - Sesión inválida" },
+          { status: 401 }
+        );
+      }
+    }
+
+    // OTRAS RUTAS API: Usar Bearer Token (para integraciones externas)
     const authHeader = request.headers.get("authorization");
     const expectedBearer = "Bearer " + API_BEARER_TOKEN;
 
