@@ -5,9 +5,10 @@ import Image from "next/image";
 export default async function ProductDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  const productId = parseInt(params.id);
+  const { id } = await params;
+  const productId = parseInt(id);
   if (isNaN(productId)) {
     return notFound();
   }
