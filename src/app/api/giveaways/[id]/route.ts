@@ -33,6 +33,8 @@ export async function GET(
       }
     );
 
+  giveaway.comments = [];
+
   return NextResponse.json(
     {
       success: true,

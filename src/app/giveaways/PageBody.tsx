@@ -11,6 +11,7 @@ import {
   Edit,
   Trash2,
   X,
+  Eye,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -268,6 +269,13 @@ export default function PageBody({
                 }
               >
                 Copiar ID del sorteo
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => router.push(`/giveaways/${giveaway.id}`)}
+                className="flex items-center"
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                Ver detalle
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

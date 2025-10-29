@@ -3,6 +3,7 @@
 import { db } from "@/db/drizzle";
 import { giveaways, giveaways_entries, users } from "@/db/schema";
 import { count, eq, inArray } from "drizzle-orm";
+import { sendEmail } from "@/app/utils/email";
 
 export const getGiveaways = async () => {
   const now = Math.floor(Date.now() / 1000);
@@ -135,6 +136,9 @@ export const getGiveawayById = async (id: number) => {
     ...giveaway[0],
     entries,
     winners,
+    comments: (giveaway[0].comments || []).sort(
+      (a, b) => b.created_at - a.created_at
+    ),
   };
 };
 
@@ -221,4 +225,124 @@ export const getUserGiveaways = async (userId: number) => {
   );
 
   return decoratedGiveaways;
+};
+
+// Función para agregar comentario a un sorteo
+export const addGiveawayComment = async (id: number, message: string) => {
+  try {
+    const giveaway = await db
+      .select()
+      .from(giveaways)
+      .where(eq(giveaways.id, id))
+      .execute();
+
+    if (!giveaway.length) {
+      throw new Error("Sorteo no encontrado");
+    }
+
+    const currentComments = giveaway[0].comments || [];
+    const newComment = {
+      created_at: Math.floor(Date.now() / 1000),
+      message,
+    };
+
+    const updatedComments = [...currentComments, newComment];
+
+    await db
+      .update(giveaways)
+      .set({ comments: updatedComments })
+      .where(eq(giveaways.id, id))
+      .execute();
+
+    return { success: true, comment: newComment };
+  } catch (error) {
+    console.error("Error adding comment:", error);
+    throw error;
+  }
+};
+
+// Función para enviar email al ganador
+export const sendWinnerEmail = async (
+  giveawayId: number,
+  winnerId: number,
+  customSubject?: string,
+  customMessage?: string
+) => {
+  try {
+    // Obtener detalles del sorteo
+    const giveaway = await db
+      .select()
+      .from(giveaways)
+      .where(eq(giveaways.id, giveawayId))
+      .execute();
+
+    if (!giveaway.length) {
+      throw new Error("Sorteo no encontrado");
+    }
+
+    // Obtener información del ganador
+    const winnerUser = await db
+      .select({
+        email: users.email,
+        username: users.username,
+      })
+      .from(users)
+      .where(eq(users.id, winnerId))
+      .execute();
+
+    if (!winnerUser.length) {
+      throw new Error("Ganador no encontrado");
+    }
+
+    const winner = winnerUser[0];
+
+    // Usar el mensaje personalizado o el por defecto
+    const defaultMessage = `¡Enhorabuena! Has sido seleccionado como ganador de nuestro sorteo.
+            Nuestro equipo se pondrá en contacto contigo pronto para coordinar la entrega del premio.`;
+
+    const message = customMessage || defaultMessage;
+
+    // Crear el contenido del email
+    const emailContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>¡Has ganado el sorteo!</title>
+      </head>
+      <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h1 style="color: #2563eb;">🎉 ¡Felicidades ${winner.username}!</h1>
+          <h2>Has ganado el sorteo: ${giveaway[0].title}</h2>
+        </div>
+        
+        <div style="text-align: center; margin: 30px 0;">
+          <img src="${giveaway[0].image}" alt="${giveaway[0].title}" style="max-width: 400px; border-radius: 8px;">
+        </div>
+        
+        <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <p style="margin: 0; font-size: 16px; white-space: pre-line;">
+            ${message}
+          </p>
+        </div>
+        
+        <div style="text-align: center; margin-top: 30px; color: #64748b;">
+          <p>Gracias por participar en nuestros sorteos</p>
+          <p>— El equipo de MateozShop</p>
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Usar el asunto personalizado o el por defecto
+    const subject =
+      customSubject || `¡Felicidades! Has ganado: ${giveaway[0].title}`;
+
+    await sendEmail(winner.email, subject, emailContent);
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error sending winner email:", error);
+    throw error;
+  }
 };

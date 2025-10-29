@@ -52,6 +52,12 @@ export const giveaways = pgTable("giveaways", {
     onDelete: "set null",
     onUpdate: "cascade",
   }),
+  comments: jsonb("comments").notNull().default("[]").$type<
+    Array<{
+      created_at: number;
+      message: string;
+    }>
+  >(),
 });
 
 export const giveaways_entries = pgTable("giveaways_entries", {
