@@ -75,3 +75,28 @@ export const giveaways_entries = pgTable("giveaways_entries", {
       onUpdate: "cascade",
     }),
 });
+
+export const user_tiktok_accounts = pgTable("user_tiktok_accounts", {
+  id: integer("id").primaryKey().unique().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id")
+    .notNull()
+    .unique()
+    .references(() => users.id, {
+      onDelete: "cascade",
+      onUpdate: "cascade",
+    }),
+  open_id: text("open_id").notNull().unique(),
+  union_id: text("union_id"),
+  display_name: text("display_name"),
+  username: text("username"),
+  avatar_url: text("avatar_url"),
+  profile_deep_link: text("profile_deep_link"),
+  scope: text("scope").notNull(),
+  access_token: text("access_token").notNull(),
+  refresh_token: text("refresh_token").notNull(),
+  access_token_expires_at: integer("access_token_expires_at").notNull(),
+  refresh_token_expires_at: integer("refresh_token_expires_at").notNull(),
+  created_at: integer("created_at").notNull(),
+  updated_at: integer("updated_at").notNull(),
+  last_synced_at: integer("last_synced_at"),
+});

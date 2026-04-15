@@ -15,6 +15,13 @@
       "when": 1761586268202,
       "tag": "0001_elite_proemial_gods",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776240000000,
+      "tag": "0002_tiktok_accounts",
+      "breakpoints": true
     }
   ]
 }
