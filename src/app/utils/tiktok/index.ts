@@ -77,11 +77,25 @@ type TikTokVideoListResponse = {
 };
 
 function requireTikTokCredentials() {
-  const clientKey = process.env.TIKTOK_CLIENT_API_KEY;
-  const clientSecret = process.env.TIKTOK_CLIENT_API_SECRET;
+  const clientKey = (
+    process.env.TIKTOK_CLIENT_API_KEY || process.env.TIKTOK_CLIENT_KEY || ""
+  ).trim();
+  const clientSecret = (
+    process.env.TIKTOK_CLIENT_API_SECRET || process.env.TIKTOK_CLIENT_SECRET || ""
+  ).trim();
 
   if (!clientKey || !clientSecret) {
-    throw new Error("MISSING_TIKTOK_CREDENTIALS");
+    const missing: string[] = [];
+    if (!clientKey) {
+      missing.push("TIKTOK_CLIENT_API_KEY");
+    }
+    if (!clientSecret) {
+      missing.push("TIKTOK_CLIENT_API_SECRET");
+    }
+
+    throw new Error(
+      `MISSING_TIKTOK_CREDENTIALS: ${missing.join(", ")}`
+    );
   }
 
   return { clientKey, clientSecret };
