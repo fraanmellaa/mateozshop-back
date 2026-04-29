@@ -100,3 +100,24 @@ export const user_tiktok_accounts = pgTable("user_tiktok_accounts", {
   updated_at: integer("updated_at").notNull(),
   last_synced_at: integer("last_synced_at"),
 });
+
+export const user_tiktok_videos = pgTable("user_tiktok_videos", {
+  id: integer("id").primaryKey().unique().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, {
+      onDelete: "cascade",
+      onUpdate: "cascade",
+    }),
+  video_id: text("video_id").notNull().unique(),
+  title: text("title").notNull(),
+  cover_image_url: text("cover_image_url"),
+  share_url: text("share_url"),
+  like_count: integer("like_count").notNull().default(0),
+  view_count: integer("view_count").notNull().default(0),
+  comment_count: integer("comment_count").notNull().default(0),
+  share_count: integer("share_count").notNull().default(0),
+  is_banned: boolean("is_banned").notNull().default(false),
+  created_at: integer("created_at").notNull(),
+  updated_at: integer("updated_at").notNull(),
+});

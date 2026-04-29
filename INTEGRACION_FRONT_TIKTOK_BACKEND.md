@@ -104,6 +104,29 @@ GET /api/user/:discordId/tiktok/videos?limit=5
 
 DELETE /api/user/:discordId/tiktok
 
+No requiere body.
+
+Comportamiento:
+
+- Revoca el access token en TikTok (best-effort, no falla si TikTok no responde)
+- Elimina la fila de la base de datos (user_tiktok_accounts)
+- Si el usuario ya no tenia cuenta vinculada, devuelve exito igualmente
+
+Respuesta:
+
+```json
+{
+  "success": true,
+  "data": {
+    "unlinked": true
+  }
+}
+```
+
+Errores posibles:
+
+- 404 USER_NOT_FOUND: el discordId no existe en el backend
+
 ## 4. Flujo funcional completo (front separado)
 
 1. Usuario hace clic en Vincular TikTok
@@ -182,6 +205,34 @@ export async function getTikTokVideos(discordId: string) {
 }
 ```
 
+### 5.4 Desvincular cuenta
+
+```ts
+export async function unlinkTikTok(discordId: string) {
+  return backendFetch(`/api/user/${discordId}/tiktok`, {
+    method: "DELETE",
+  });
+}
+```
+
+Ejemplo de uso desde un Server Action o route handler del front:
+
+```ts
+// app/api/tiktok/unlink/route.ts (BFF del front)
+import { unlinkTikTok } from "@/lib/tiktok-backend";
+import { getServerSession } from "next-auth"; // o tu metodo de auth
+
+export async function DELETE() {
+  const session = await getServerSession();
+  if (!session?.user?.discordId) {
+    return Response.json({ error: "UNAUTHORIZED" }, { status: 401 });
+  }
+
+  await unlinkTikTok(session.user.discordId);
+  return Response.json({ success: true });
+}
+```
+
 ## 6. Pagina callback en el front
 
 En tu callback:
@@ -248,6 +299,7 @@ El backend ya refresca token automaticamente cuando hace falta.
    - callback con code/state
    - connect
    - profile
+   - unlink (DELETE /api/user/:discordId/tiktok)
    - videos (limit=5)
 5. Probar unlink
 

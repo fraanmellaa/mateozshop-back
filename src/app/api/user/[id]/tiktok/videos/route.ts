@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 
 import { validateBearerToken } from "@/app/utils/bearerAuth";
 import { getUserByDiscordId } from "@/app/utils/users";
-import { fetchTikTokVideos, getValidTikTokAccessToken } from "@/app/utils/tiktok";
-
-const querySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(20).optional(),
-});
+import { getAssociatedTikTokVideos } from "@/app/utils/tiktok";
 
 export async function GET(
   request: NextRequest,
@@ -27,47 +22,23 @@ export async function GET(
     );
   }
 
-  const parseResult = querySchema.safeParse(
-    Object.fromEntries(request.nextUrl.searchParams.entries())
-  );
+  const videos = await getAssociatedTikTokVideos(user.id);
 
-  if (!parseResult.success) {
-    return NextResponse.json(
-      { success: false, error: "INVALID_QUERY_PARAMS", details: parseResult.error },
-      { status: 400 }
-    );
-  }
-
-  const accessToken = await getValidTikTokAccessToken(user.id);
-  if (!accessToken) {
-    return NextResponse.json(
-      { success: false, error: "TIKTOK_NOT_LINKED" },
-      { status: 404 }
-    );
-  }
-
-  try {
-    const limit = parseResult.data.limit ?? 5;
-    const result = await fetchTikTokVideos(accessToken, limit);
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        linked: true,
-        limit,
-        videos: result.videos,
-        cursor: result.cursor,
-        has_more: result.has_more,
-      },
-    });
-  } catch (error) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "TIKTOK_VIDEOS_FAILED",
-        message: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 502 }
-    );
-  }
+  return NextResponse.json({
+    success: true,
+    data: {
+      linked: true,
+      videos: videos.map((video) => ({
+        id: video.video_id,
+        title: video.title,
+        cover_image_url: video.cover_image_url || "",
+        view_count: video.view_count,
+        like_count: video.like_count,
+        comment_count: video.comment_count,
+        share_count: video.share_count,
+        create_time: video.created_at,
+        share_url: video.share_url || undefined,
+      })),
+    },
+  });
 }

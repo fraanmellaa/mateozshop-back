@@ -1,6 +1,6 @@
 import { db } from "@/db/drizzle";
-import { user_tiktok_accounts } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { user_tiktok_accounts, user_tiktok_videos } from "@/db/schema";
+import { desc, eq } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import { createHash, randomBytes } from "crypto";
 
@@ -318,8 +318,12 @@ export async function fetchTikTokUserInfo(accessToken: string) {
   return data.data.user;
 }
 
-export async function fetchTikTokVideos(accessToken: string, maxCount = 5) {
-  const safeMaxCount = Math.max(1, Math.min(20, maxCount));
+async function fetchRawTikTokVideos(
+  accessToken: string,
+  maxCount = 20,
+  cursor?: number
+) {
+  const requestedMaxCount = Math.max(1, Math.min(20, maxCount));
 
   const fields = [
     "id",
@@ -344,7 +348,10 @@ export async function fetchTikTokVideos(accessToken: string, maxCount = 5) {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ max_count: safeMaxCount }),
+      body: JSON.stringify({
+        max_count: requestedMaxCount,
+        ...(typeof cursor === "number" ? { cursor } : {}),
+      }),
       cache: "no-store",
     }
   );
@@ -359,6 +366,207 @@ export async function fetchTikTokVideos(accessToken: string, maxCount = 5) {
     videos: data.data?.videos || [],
     cursor: data.data?.cursor || 0,
     has_more: data.data?.has_more || false,
+  };
+}
+
+export async function fetchTikTokVideos(accessToken: string, maxCount = 5) {
+  const safeMaxCount = Math.max(1, Math.min(20, maxCount));
+  const data = await fetchRawTikTokVideos(accessToken, 20);
+  const videos = data.videos;
+  const filteredVideos = videos.filter((video) => {
+    const searchableText = `${video.title || ""} ${video.video_description || ""}`.toLowerCase();
+    return searchableText.includes("#mateozshop");
+  });
+
+  return {
+    videos: filteredVideos.slice(0, safeMaxCount),
+    cursor: data.cursor,
+    has_more: data.has_more,
+  };
+}
+
+type TikTokPublicItemDetail = {
+  id: string;
+  title: string;
+  cover_image_url: string | null;
+  share_url: string | null;
+  like_count: number;
+  view_count: number;
+  comment_count: number;
+  share_count: number;
+  create_time: number;
+  author_unique_id: string;
+};
+
+export async function fetchTikTokPublicVideoDetail(
+  videoId: string
+): Promise<TikTokPublicItemDetail | null> {
+  try {
+    const response = await fetch(
+      `https://www.tiktok.com/api/item/detail/?itemId=${encodeURIComponent(videoId)}`,
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          Referer: "https://www.tiktok.com/",
+        },
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = (await response.json()) as any;
+    const item = data?.itemInfo?.itemStruct;
+
+    if (!item) {
+      return null;
+    }
+
+    const stats = item.stats ?? {};
+    const video = item.video ?? {};
+
+    return {
+      id: String(item.id || videoId),
+      title: item.desc || "",
+      cover_image_url: video.originCover || video.cover || null,
+      share_url: `https://www.tiktok.com/@${item.author?.uniqueId ?? ""}/video/${item.id}`,
+      like_count: Number(stats.diggCount ?? 0),
+      view_count: Number(stats.playCount ?? 0),
+      comment_count: Number(stats.commentCount ?? 0),
+      share_count: Number(stats.shareCount ?? 0),
+      create_time: Number(item.createTime ?? 0),
+      author_unique_id: String(item.author?.uniqueId ?? ""),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchTikTokVideoById(accessToken: string, videoId: string) {
+  let cursor = 0;
+  let hasMore = true;
+  let tries = 0;
+
+  while (hasMore && tries < 10) {
+    const page = await fetchRawTikTokVideos(accessToken, 20, cursor);
+    const match = page.videos.find(
+      (video) => String(video.id || "") === videoId
+    );
+
+    if (match) {
+      return match;
+    }
+
+    hasMore = Boolean(page.has_more);
+    cursor = page.cursor || 0;
+    tries += 1;
+  }
+
+  return null;
+}
+
+export async function upsertAssociatedTikTokVideo(params: {
+  userId: number;
+  videoId: string;
+  title: string;
+  coverImageUrl?: string | null;
+  shareUrl?: string | null;
+  likeCount?: number;
+  viewCount?: number;
+  commentCount?: number;
+  shareCount?: number;
+  createdAt?: number;
+}) {
+  const now = Math.floor(Date.now() / 1000);
+
+  const result = await db
+    .insert(user_tiktok_videos)
+    .values({
+      user_id: params.userId,
+      video_id: params.videoId,
+      title: params.title,
+      cover_image_url: params.coverImageUrl || null,
+      share_url: params.shareUrl || null,
+      like_count: params.likeCount || 0,
+      view_count: params.viewCount || 0,
+      comment_count: params.commentCount || 0,
+      share_count: params.shareCount || 0,
+      created_at: params.createdAt || now,
+      updated_at: now,
+    })
+    .onConflictDoUpdate({
+      target: user_tiktok_videos.video_id,
+      set: {
+        user_id: params.userId,
+        title: params.title,
+        cover_image_url: params.coverImageUrl || null,
+        share_url: params.shareUrl || null,
+        like_count: params.likeCount || 0,
+        view_count: params.viewCount || 0,
+        comment_count: params.commentCount || 0,
+        share_count: params.shareCount || 0,
+        updated_at: now,
+      },
+    })
+    .returning();
+
+  return result[0] ?? null;
+}
+
+export async function getAssociatedTikTokVideos(userId: number) {
+  return db
+    .select()
+    .from(user_tiktok_videos)
+    .where(eq(user_tiktok_videos.user_id, userId))
+    .orderBy(desc(user_tiktok_videos.created_at));
+}
+
+export async function refreshAssociatedTikTokVideosStats(userId: number) {
+  const associatedVideos = await getAssociatedTikTokVideos(userId);
+
+  if (associatedVideos.length === 0) {
+    return { updated: 0, not_found: 0, total: 0 };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  let updated = 0;
+  let not_found = 0;
+
+  await Promise.all(
+    associatedVideos.map(async (video) => {
+      const detail = await fetchTikTokPublicVideoDetail(video.video_id);
+
+      if (!detail) {
+        not_found += 1;
+        return;
+      }
+
+      await db
+        .update(user_tiktok_videos)
+        .set({
+          title: detail.title || video.title,
+          cover_image_url: detail.cover_image_url || video.cover_image_url,
+          share_url: detail.share_url || video.share_url,
+          like_count: detail.like_count,
+          view_count: detail.view_count,
+          comment_count: detail.comment_count,
+          share_count: detail.share_count,
+          updated_at: now,
+        })
+        .where(eq(user_tiktok_videos.video_id, video.video_id));
+
+      updated += 1;
+    })
+  );
+
+  return {
+    updated,
+    not_found,
+    total: associatedVideos.length,
   };
 }
 
