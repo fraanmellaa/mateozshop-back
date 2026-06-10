@@ -3,6 +3,7 @@
 import { db } from "@/db/drizzle";
 import { giveaways, giveaways_entries, users } from "@/db/schema";
 import { eq, isNull, and, lte } from "drizzle-orm";
+import { publishUserNotification } from "@/app/utils/realtime";
 
 /**
  * Función para realizar un sorteo y seleccionar un ganador
@@ -22,6 +23,10 @@ export const performGiveawayLottery = async (giveawayId: number) => {
       throw new Error(`Sorteo con ID ${giveawayId} no encontrado`);
     }
 
+    if (giveaway[0].is_closed) {
+      throw new Error(`El sorteo ${giveawayId} ya esta cerrado`);
+    }
+
     if (giveaway[0].winner) {
       throw new Error(`El sorteo ${giveawayId} ya tiene un ganador`);
     }
@@ -30,6 +35,7 @@ export const performGiveawayLottery = async (giveawayId: number) => {
     const entries = await db
       .select({
         userId: giveaways_entries.user_id,
+        discordId: users.discord_id,
         username: users.username,
         image: users.image,
         kickId: users.kick_id,
@@ -40,7 +46,27 @@ export const performGiveawayLottery = async (giveawayId: number) => {
       .execute();
 
     if (entries.length === 0) {
-      throw new Error(`No hay participantes en el sorteo ${giveawayId}`);
+      await db
+        .update(giveaways)
+        .set({
+          winner: null,
+          is_closed: true,
+        })
+        .where(eq(giveaways.id, giveawayId))
+        .execute();
+
+      console.log(
+        `⚪ Sorteo ${giveawayId} cerrado sin ganador (sin participantes)`
+      );
+
+      return {
+        success: true,
+        giveawayId,
+        winner: null,
+        closedWithoutWinner: true,
+        notifiedParticipants: 0,
+        totalParticipants: 0,
+      };
     }
 
     // Realizar el sorteo - seleccionar un ganador aleatorio
@@ -50,9 +76,45 @@ export const performGiveawayLottery = async (giveawayId: number) => {
     // Actualizar el sorteo con el ganador
     await db
       .update(giveaways)
-      .set({ winner: winner.userId })
+      .set({
+        winner: winner.userId,
+        is_closed: true,
+      })
       .where(eq(giveaways.id, giveawayId))
       .execute();
+
+    const uniqueParticipants = Array.from(
+      new Map(entries.map((entry) => [entry.userId, entry])).values()
+    );
+
+    for (const participant of uniqueParticipants) {
+      if (!participant.discordId) continue;
+
+      if (participant.userId === winner.userId) {
+        await publishUserNotification({
+          discordId: participant.discordId,
+          type: "giveaway_won",
+          title: "Has ganado el sorteo",
+          body: `Enhorabuena, has ganado \"${giveaway[0].title}\".`,
+          giveawayId,
+          giveawayTitle: giveaway[0].title,
+          giveawayImage: giveaway[0].image,
+          targetUrl: `/sorteos/${giveawayId}`,
+        });
+        continue;
+      }
+
+      await publishUserNotification({
+        discordId: participant.discordId,
+        type: "giveaway_finished",
+        title: "Sorteo finalizado",
+        body: `El sorteo \"${giveaway[0].title}\" ha terminado.`,
+        giveawayId,
+        giveawayTitle: giveaway[0].title,
+        giveawayImage: giveaway[0].image,
+        targetUrl: "/mi-cuenta/sorteos",
+      });
+    }
 
     console.log(
       `🎉 Sorteo ${giveawayId} completado. Ganador: ${winner.username} (ID: ${winner.userId})`
@@ -67,6 +129,7 @@ export const performGiveawayLottery = async (giveawayId: number) => {
         image: winner.image,
         kickId: winner.kickId,
       },
+      notifiedParticipants: uniqueParticipants.length,
       totalParticipants: entries.length,
     };
   } catch (error) {
@@ -87,7 +150,7 @@ export const processFinishedGiveaways = async () => {
   try {
     const now = Math.floor(Date.now() / 1000);
 
-    // Buscar sorteos que han finalizado pero no tienen ganador
+    // Buscar sorteos finalizados que aun no fueron cerrados por el lottery
     const finishedGiveaways = await db
       .select({
         id: giveaways.id,
@@ -96,8 +159,11 @@ export const processFinishedGiveaways = async () => {
       })
       .from(giveaways)
       .where(
-        // Sorteos que han terminado y no tienen ganador
-        and(lte(giveaways.end_at, now), isNull(giveaways.winner))
+        and(
+          lte(giveaways.end_at, now),
+          isNull(giveaways.winner),
+          eq(giveaways.is_closed, false)
+        )
       )
       .execute();
 
@@ -138,8 +204,12 @@ export const getGiveawayStats = async () => {
     const stats = await db.select().from(giveaways).execute();
 
     const active = stats.filter((g) => g.start_at <= now && g.end_at > now);
-    const finished = stats.filter((g) => g.end_at <= now && g.winner);
-    const pending = stats.filter((g) => g.end_at <= now && !g.winner);
+    const finished = stats.filter(
+      (g) => g.end_at <= now && (Boolean(g.winner) || g.is_closed)
+    );
+    const pending = stats.filter(
+      (g) => g.end_at <= now && !g.winner && !g.is_closed
+    );
     const upcoming = stats.filter((g) => g.start_at > now);
 
     return {

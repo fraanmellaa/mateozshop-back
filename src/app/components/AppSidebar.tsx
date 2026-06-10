@@ -7,6 +7,7 @@ import {
   ShoppingCart,
   Trophy,
   LogOut,
+  Medal,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -50,6 +51,11 @@ const items = [
     title: "Sorteos",
     url: "/giveaways",
     icon: Trophy,
+  },
+  {
+    title: "TikTok Leaderboards",
+    url: "/tiktok-leaderboards",
+    icon: Medal,
   },
 ];
 

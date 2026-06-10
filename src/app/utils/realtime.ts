@@ -59,12 +59,21 @@ export async function publishBidUpdated(payload: {
 
 export async function publishUserNotification(payload: {
   discordId: string;
-  type: "auction_win" | "auction_outbid" | "auction_finished" | "auction_starting";
+  type:
+    | "auction_win"
+    | "auction_outbid"
+    | "auction_finished"
+    | "auction_starting"
+    | "giveaway_finished"
+    | "giveaway_won";
   title: string;
   body: string;
   productId?: number;
   productName?: string;
   productImage?: string;
+  giveawayId?: number;
+  giveawayTitle?: string;
+  giveawayImage?: string;
   amount?: number;
   initialPrice?: number;
   targetUrl: string;

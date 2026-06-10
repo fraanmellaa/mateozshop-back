@@ -119,6 +119,7 @@ export const config = {
     "/products/:path*",
     "/orders/:path*",
     "/giveaways/:path*",
+    "/tiktok-leaderboards/:path*",
     "/login",
     // Todas las APIs
     "/api/:path*",

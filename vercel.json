@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/giveaways",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/tiktok/leaderboards",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

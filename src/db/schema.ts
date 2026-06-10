@@ -89,6 +89,7 @@ export const giveaways = pgTable("giveaways", {
   image: text("image").notNull(),
   start_at: integer("start_at").notNull(),
   end_at: integer("end_at").notNull(),
+  is_closed: boolean("is_closed").notNull().default(false),
   winner: integer("winner").references(() => users.id, {
     onDelete: "set null",
     onUpdate: "cascade",
@@ -159,6 +160,65 @@ export const user_tiktok_videos = pgTable("user_tiktok_videos", {
   comment_count: integer("comment_count").notNull().default(0),
   share_count: integer("share_count").notNull().default(0),
   is_banned: boolean("is_banned").notNull().default(false),
+  associated_at: integer("associated_at").notNull(),
+  created_at: integer("created_at").notNull(),
+  updated_at: integer("updated_at").notNull(),
+});
+
+export const tiktok_leaderboards = pgTable("tiktok_leaderboards", {
+  id: integer("id").primaryKey().unique().generatedAlwaysAsIdentity(),
+  title: text("title").notNull(),
+  description: text("description"),
+  start_at: integer("start_at").notNull(),
+  end_at: integer("end_at").notNull(),
+  status: text("status").notNull().default("scheduled"),
+  finalized_at: integer("finalized_at"),
+  review_notes: text("review_notes"),
+  created_at: integer("created_at").notNull(),
+  updated_at: integer("updated_at").notNull(),
+});
+
+export const tiktok_leaderboard_prizes = pgTable("tiktok_leaderboard_prizes", {
+  id: integer("id").primaryKey().unique().generatedAlwaysAsIdentity(),
+  leaderboard_id: integer("leaderboard_id")
+    .notNull()
+    .references(() => tiktok_leaderboards.id, {
+      onDelete: "cascade",
+      onUpdate: "cascade",
+    }),
+  position: integer("position").notNull(),
+  reward: text("reward").notNull(),
+  created_at: integer("created_at").notNull(),
+});
+
+export const tiktok_leaderboard_results = pgTable("tiktok_leaderboard_results", {
+  id: integer("id").primaryKey().unique().generatedAlwaysAsIdentity(),
+  leaderboard_id: integer("leaderboard_id")
+    .notNull()
+    .references(() => tiktok_leaderboards.id, {
+      onDelete: "cascade",
+      onUpdate: "cascade",
+    }),
+  position: integer("position").notNull(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+  video_row_id: integer("video_row_id")
+    .references(() => user_tiktok_videos.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+  video_id: text("video_id").notNull(),
+  video_title: text("video_title").notNull(),
+  video_cover_image_url: text("video_cover_image_url"),
+  video_share_url: text("video_share_url"),
+  view_count: integer("view_count").notNull().default(0),
+  reward: text("reward").notNull(),
+  status: text("status").notNull().default("pending_review"),
+  review_note: text("review_note"),
   created_at: integer("created_at").notNull(),
   updated_at: integer("updated_at").notNull(),
 });

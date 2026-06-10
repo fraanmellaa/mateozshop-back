@@ -495,6 +495,7 @@ export async function upsertAssociatedTikTokVideo(params: {
       view_count: params.viewCount || 0,
       comment_count: params.commentCount || 0,
       share_count: params.shareCount || 0,
+      associated_at: now,
       created_at: params.createdAt || now,
       updated_at: now,
     })
@@ -509,6 +510,7 @@ export async function upsertAssociatedTikTokVideo(params: {
         view_count: params.viewCount || 0,
         comment_count: params.commentCount || 0,
         share_count: params.shareCount || 0,
+        associated_at: now,
         updated_at: now,
       },
     })
