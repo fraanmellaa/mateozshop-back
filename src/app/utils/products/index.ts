@@ -2,7 +2,7 @@
 
 import { db } from "@/db/drizzle";
 import { products, users } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, ne, or } from "drizzle-orm";
 
 export type ProductRow = {
   id: number;
@@ -16,6 +16,8 @@ export type ProductRow = {
   auction_ends_at: number | null;
   auction_duration_seconds: number;
   auction_cooldown_seconds: number;
+  auction_parent_product_id: number | null;
+  auction_starting_notified: boolean;
   auction_reopens_at: number | null;
   auction_round: number;
   auction_status: string;
@@ -30,7 +32,15 @@ export type ProductRow = {
   created_at: number;
 };
 
-export const getProducts = async (): Promise<ProductRow[]> => {
+export const getProducts = async (
+  options?: {
+    includeArchivedAuctions?: boolean;
+    onlyActiveAuctions?: boolean;
+  }
+): Promise<ProductRow[]> => {
+  const includeArchivedAuctions = options?.includeArchivedAuctions ?? false;
+  const onlyActiveAuctions = options?.onlyActiveAuctions ?? false;
+
   const productsData = await db
     .select({
       id: products.id,
@@ -44,6 +54,8 @@ export const getProducts = async (): Promise<ProductRow[]> => {
       auction_ends_at: products.auction_ends_at,
       auction_duration_seconds: products.auction_duration_seconds,
       auction_cooldown_seconds: products.auction_cooldown_seconds,
+      auction_parent_product_id: products.auction_parent_product_id,
+      auction_starting_notified: products.auction_starting_notified,
       auction_reopens_at: products.auction_reopens_at,
       auction_round: products.auction_round,
       auction_status: products.auction_status,
@@ -58,6 +70,25 @@ export const getProducts = async (): Promise<ProductRow[]> => {
       created_at: products.created_at,
     })
     .from(products)
+    .where(
+      includeArchivedAuctions
+        ? undefined
+        : onlyActiveAuctions
+          ? or(
+              eq(products.is_auction, false),
+              and(
+                eq(products.is_auction, true),
+                or(
+                  eq(products.auction_status, "in_progress"),
+                  eq(products.auction_status, "finalizing")
+                )
+              )
+            )
+          : or(
+              eq(products.is_auction, false),
+              and(eq(products.is_auction, true), ne(products.auction_status, "archived"))
+            )
+    )
     .leftJoin(users, eq(products.current_bidder_user_id, users.id))
     .limit(10000);
 
@@ -81,6 +112,7 @@ export const createProduct = async (data: {
   auction_ends_at?: number | null;
   auction_duration_seconds?: number;
   auction_cooldown_seconds?: number;
+  auction_parent_product_id?: number | null;
   sendable?: boolean;
   codes?: string[];
 }) => {
@@ -99,6 +131,8 @@ export const createProduct = async (data: {
       auction_ends_at: data.auction_ends_at ?? null,
       auction_duration_seconds: data.auction_duration_seconds ?? 3600,
       auction_cooldown_seconds: data.auction_cooldown_seconds ?? 300,
+      auction_parent_product_id: data.auction_parent_product_id ?? null,
+      auction_starting_notified: false,
       auction_reopens_at: null,
       auction_round: 1,
       auction_status: "in_progress",
@@ -146,6 +180,8 @@ export const updateProduct = async (
     auction_ends_at: number | null;
     auction_duration_seconds: number;
     auction_cooldown_seconds: number;
+    auction_parent_product_id: number | null;
+    auction_starting_notified: boolean;
     auction_reopens_at: number | null;
     auction_round: number;
     auction_status: string;
@@ -186,6 +222,8 @@ export const getProductById = async (productId: number) => {
       auction_ends_at: products.auction_ends_at,
       auction_duration_seconds: products.auction_duration_seconds,
       auction_cooldown_seconds: products.auction_cooldown_seconds,
+      auction_parent_product_id: products.auction_parent_product_id,
+      auction_starting_notified: products.auction_starting_notified,
       auction_reopens_at: products.auction_reopens_at,
       auction_round: products.auction_round,
       auction_status: products.auction_status,

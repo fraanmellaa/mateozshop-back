@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { db } from "@/db/drizzle";
 import { product_bids, products, users } from "@/db/schema";
-import { publishBidUpdated } from "@/app/utils/realtime";
+import { publishBidUpdated, publishUserNotification } from "@/app/utils/realtime";
 
 const bodySchema = z.object({
   discord_id: z.string().min(1),
@@ -59,6 +59,7 @@ export async function POST(
           auction_ends_at,
           auction_round,
           auction_status,
+          auction_parent_product_id,
           current_bid,
           current_bidder_user_id
         from products
@@ -76,6 +77,7 @@ export async function POST(
             auction_ends_at: number | null;
             auction_round: number;
             auction_status: string;
+            auction_parent_product_id: number | null;
             current_bid: number;
             current_bidder_user_id: number | null;
           }
@@ -115,6 +117,9 @@ export async function POST(
         throw new Error(`BID_TOO_LOW:${minBid}`);
       }
 
+      const previousBidderId = row.current_bidder_user_id;
+      const previousBidAmount = row.current_bid;
+
       await tx.insert(product_bids).values({
         product_id: productId,
         user_id: user.id,
@@ -135,6 +140,41 @@ export async function POST(
 
       const updated = updatedRows[0];
 
+      let outbidNotification:
+        | {
+            discordId: string;
+            title: string;
+            body: string;
+            targetUrl: string;
+          }
+        | undefined;
+
+      const exactOneStepOutbid =
+        previousBidderId &&
+        previousBidderId !== user.id &&
+        body.amount === previousBidAmount + Math.max(1, row.min_bid_increment || 1);
+
+      if (exactOneStepOutbid) {
+        const previousBidderRows = await tx
+          .select({
+            discord_id: users.discord_id,
+          })
+          .from(users)
+          .where(eq(users.id, previousBidderId))
+          .limit(1);
+
+        const previousBidder = previousBidderRows[0];
+
+        if (previousBidder?.discord_id) {
+          outbidNotification = {
+            discordId: previousBidder.discord_id,
+            title: "Te han sobrepujado",
+            body: `${user.username} subio la puja a ${body.amount} puntos.`,
+            targetUrl: `/puntos?auction=${productId}&open=1`,
+          };
+        }
+      }
+
       return {
         bidderName: user.username,
         bidderImage: user.image,
@@ -143,6 +183,7 @@ export async function POST(
         minBidIncrement: updated?.min_bid_increment ?? row.min_bid_increment,
         auctionStatus: row.auction_status,
         auctionEndsAt: row.auction_ends_at,
+        outbidNotification,
       };
     });
 
@@ -156,6 +197,18 @@ export async function POST(
       auctionStatus: result.auctionStatus,
       auctionEndsAt: result.auctionEndsAt,
     });
+
+    if (result.outbidNotification) {
+      await publishUserNotification({
+        discordId: result.outbidNotification.discordId,
+        type: "auction_outbid",
+        title: result.outbidNotification.title,
+        body: result.outbidNotification.body,
+        productId,
+        amount: result.amount,
+        targetUrl: result.outbidNotification.targetUrl,
+      });
+    }
 
     return NextResponse.json(
       {

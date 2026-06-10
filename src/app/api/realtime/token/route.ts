@@ -19,6 +19,7 @@ export async function GET() {
   const capability = JSON.stringify({
     auctions: ["subscribe"],
     "product-*": ["subscribe"],
+    "user-*": ["subscribe"],
   });
 
   const tokenRequest = await ably.auth.createTokenRequest({

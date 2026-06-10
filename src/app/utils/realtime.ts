@@ -22,6 +22,13 @@ export async function publishBidUpdated(payload: {
   auctionStatus?: string;
   auctionEndsAt?: number | null;
   auctionReopensAt?: number | null;
+  successorProductId?: number | null;
+  successorName?: string | null;
+  successorImage?: string | null;
+  successorPrice?: number | null;
+  successorStock?: number | null;
+  successorAuctionStatus?: string | null;
+  successorAuctionReopensAt?: number | null;
 }) {
   const ably = getAbly();
   if (!ably) return;
@@ -36,9 +43,40 @@ export async function publishBidUpdated(payload: {
     auctionStatus: payload.auctionStatus,
     auctionEndsAt: payload.auctionEndsAt,
     auctionReopensAt: payload.auctionReopensAt,
+    successorProductId: payload.successorProductId,
+    successorName: payload.successorName,
+    successorImage: payload.successorImage,
+    successorPrice: payload.successorPrice,
+    successorStock: payload.successorStock,
+    successorAuctionStatus: payload.successorAuctionStatus,
+    successorAuctionReopensAt: payload.successorAuctionReopensAt,
     at: Date.now(),
   };
 
   await ably.channels.get(`product-${payload.productId}`).publish("bid:updated", message);
   await ably.channels.get("auctions").publish("bid:updated", message);
+}
+
+export async function publishUserNotification(payload: {
+  discordId: string;
+  type: "auction_win" | "auction_outbid" | "auction_finished" | "auction_starting";
+  title: string;
+  body: string;
+  productId?: number;
+  productName?: string;
+  productImage?: string;
+  amount?: number;
+  initialPrice?: number;
+  targetUrl: string;
+}) {
+  const ably = getAbly();
+  if (!ably) return;
+
+  await ably
+    .channels
+    .get(`user-${payload.discordId}`)
+    .publish("notify", {
+      ...payload,
+      at: Date.now(),
+    });
 }

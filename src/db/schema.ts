@@ -35,6 +35,10 @@ export const products = pgTable("products", {
   auction_cooldown_seconds: integer("auction_cooldown_seconds")
     .notNull()
     .default(300),
+  auction_parent_product_id: integer("auction_parent_product_id"),
+  auction_starting_notified: boolean("auction_starting_notified")
+    .notNull()
+    .default(false),
   auction_reopens_at: integer("auction_reopens_at"),
   auction_round: integer("auction_round").notNull().default(1),
   auction_status: text("auction_status").notNull().default("in_progress"),
