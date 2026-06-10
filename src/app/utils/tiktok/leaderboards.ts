@@ -245,6 +245,9 @@ export async function getLeaderboardRankingSnapshot(leaderboardId: number) {
       video_cover_image_url: tiktok_leaderboard_results.video_cover_image_url,
       video_share_url: tiktok_leaderboard_results.video_share_url,
       view_count: tiktok_leaderboard_results.view_count,
+      like_count: tiktok_leaderboard_results.like_count,
+      comment_count: tiktok_leaderboard_results.comment_count,
+      share_count: tiktok_leaderboard_results.share_count,
       reward: tiktok_leaderboard_results.reward,
       status: tiktok_leaderboard_results.status,
       review_note: tiktok_leaderboard_results.review_note,
@@ -273,6 +276,9 @@ export async function getLiveLeaderboardRanking(
       video_cover_image_url: user_tiktok_videos.cover_image_url,
       video_share_url: user_tiktok_videos.share_url,
       view_count: user_tiktok_videos.view_count,
+      like_count: user_tiktok_videos.like_count,
+      comment_count: user_tiktok_videos.comment_count,
+      share_count: user_tiktok_videos.share_count,
       associated_at: user_tiktok_videos.associated_at,
     })
     .from(user_tiktok_videos)
@@ -318,6 +324,9 @@ export async function getAdminTikTokLeaderboards() {
         video_cover_image_url: tiktok_leaderboard_results.video_cover_image_url,
         video_share_url: tiktok_leaderboard_results.video_share_url,
         view_count: tiktok_leaderboard_results.view_count,
+        like_count: tiktok_leaderboard_results.like_count,
+        comment_count: tiktok_leaderboard_results.comment_count,
+        share_count: tiktok_leaderboard_results.share_count,
         reward: tiktok_leaderboard_results.reward,
         status: tiktok_leaderboard_results.status,
         review_note: tiktok_leaderboard_results.review_note,
@@ -387,7 +396,12 @@ export async function getPublicTikTokLeaderboards() {
 
 export async function updateTikTokLeaderboardResultReview(params: {
   resultId: number;
-  status: "pending_review" | "approved" | "rejected" | "prize_delivered";
+  status:
+    | "pending_review"
+    | "approved"
+    | "rejected"
+    | "prize_delivered"
+    | "disqualified";
   reviewNote?: string;
 }) {
   const now = Math.floor(Date.now() / 1000);
@@ -403,6 +417,185 @@ export async function updateTikTokLeaderboardResultReview(params: {
     .returning();
 
   return updated[0] ?? null;
+}
+
+export async function disqualifyAndReallocateTikTokLeaderboardResult(params: {
+  resultId: number;
+  reviewNote?: string;
+}) {
+  const now = Math.floor(Date.now() / 1000);
+
+  const currentRows = await db
+    .select()
+    .from(tiktok_leaderboard_results)
+    .where(eq(tiktok_leaderboard_results.id, params.resultId))
+    .limit(1);
+
+  const current = currentRows[0];
+  if (!current) {
+    throw new Error("RESULT_NOT_FOUND");
+  }
+
+  if (current.status === "disqualified") {
+    throw new Error("RESULT_ALREADY_DISQUALIFIED");
+  }
+
+  const boardRows = await db
+    .select()
+    .from(tiktok_leaderboards)
+    .where(eq(tiktok_leaderboards.id, current.leaderboard_id))
+    .limit(1);
+
+  const board = boardRows[0];
+  if (!board) {
+    throw new Error("LEADERBOARD_NOT_FOUND");
+  }
+
+  const prizes = await db
+    .select()
+    .from(tiktok_leaderboard_prizes)
+    .where(eq(tiktok_leaderboard_prizes.leaderboard_id, board.id))
+    .orderBy(asc(tiktok_leaderboard_prizes.position));
+
+  if (prizes.length === 0) {
+    throw new Error("LEADERBOARD_PRIZES_REQUIRED");
+  }
+
+  const results = await db
+    .select()
+    .from(tiktok_leaderboard_results)
+    .where(eq(tiktok_leaderboard_results.leaderboard_id, board.id));
+
+  const disqualifiedUserIds = new Set<number>();
+  for (const result of results) {
+    if (result.status === "disqualified") {
+      disqualifiedUserIds.add(result.user_id);
+    }
+  }
+  disqualifiedUserIds.add(current.user_id);
+
+  const maxPosition = prizes.reduce(
+    (max, prize) => Math.max(max, prize.position),
+    0
+  );
+
+  const ranking = await getLiveLeaderboardRanking(
+    board.start_at,
+    board.end_at,
+    Math.max(maxPosition + disqualifiedUserIds.size + 20, 100)
+  );
+
+  const eligibleRanking = ranking.filter(
+    (entry) => !disqualifiedUserIds.has(entry.user_id)
+  );
+
+  const awardedRows = prizes
+    .map((prize) => {
+      const ranked = eligibleRanking[prize.position - 1];
+      if (!ranked) return null;
+
+      return {
+        leaderboard_id: board.id,
+        position: prize.position,
+        user_id: ranked.user_id,
+        video_row_id: ranked.video_row_id,
+        video_id: ranked.video_id,
+        video_title: ranked.video_title,
+        video_cover_image_url: ranked.video_cover_image_url,
+        video_share_url: ranked.video_share_url,
+        view_count: ranked.view_count,
+        like_count: ranked.like_count,
+        comment_count: ranked.comment_count,
+        share_count: ranked.share_count,
+        reward: prize.reward,
+        status: "pending_review",
+        review_note: "Reajustado por descalificacion previa",
+        created_at: now,
+        updated_at: now,
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+  const existingDisqualified = results.filter(
+    (result) => result.status === "disqualified"
+  );
+
+  const disqualifiedSnapshot = {
+    leaderboard_id: board.id,
+    position: current.position,
+    user_id: current.user_id,
+    video_row_id: current.video_row_id,
+    video_id: current.video_id,
+    video_title: current.video_title,
+    video_cover_image_url: current.video_cover_image_url,
+    video_share_url: current.video_share_url,
+    view_count: current.view_count,
+    like_count: current.like_count,
+    comment_count: current.comment_count,
+    share_count: current.share_count,
+    reward: current.reward,
+    status: "disqualified",
+    review_note:
+      params.reviewNote?.trim() ||
+      "Usuario descalificado manualmente. Premio reasignado.",
+    created_at: current.created_at,
+    updated_at: now,
+  };
+
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(tiktok_leaderboard_results)
+      .where(eq(tiktok_leaderboard_results.leaderboard_id, board.id));
+
+    const snapshots = [...existingDisqualified, disqualifiedSnapshot].map(
+      (row) => ({
+        ...row,
+        id: undefined,
+      })
+    );
+
+    const normalizedSnapshots = snapshots.map((row) => ({
+      leaderboard_id: row.leaderboard_id,
+      position: row.position,
+      user_id: row.user_id,
+      video_row_id: row.video_row_id,
+      video_id: row.video_id,
+      video_title: row.video_title,
+      video_cover_image_url: row.video_cover_image_url,
+      video_share_url: row.video_share_url,
+      view_count: row.view_count,
+      like_count: row.like_count,
+      comment_count: row.comment_count,
+      share_count: row.share_count,
+      reward: row.reward,
+      status: "disqualified" as const,
+      review_note: row.review_note,
+      created_at: row.created_at,
+      updated_at: now,
+    }));
+
+    if (normalizedSnapshots.length > 0) {
+      await tx.insert(tiktok_leaderboard_results).values(normalizedSnapshots);
+    }
+
+    if (awardedRows.length > 0) {
+      await tx.insert(tiktok_leaderboard_results).values(awardedRows);
+    }
+
+    const baseReview = board.review_notes?.trim();
+    const extra = `Reajustacion de puestos: ${new Date(now * 1000).toISOString()}`;
+    const mergedReview = baseReview ? `${baseReview}\n${extra}` : extra;
+
+    await tx
+      .update(tiktok_leaderboards)
+      .set({
+        has_reallocation: true,
+        reallocation_count: board.reallocation_count + 1,
+        review_notes: mergedReview,
+        updated_at: now,
+      })
+      .where(eq(tiktok_leaderboards.id, board.id));
+  });
 }
 
 export async function processTikTokLeaderboardsTick() {
@@ -474,6 +667,9 @@ export async function processTikTokLeaderboardsTick() {
               video_cover_image_url: ranked.video_cover_image_url,
               video_share_url: ranked.video_share_url,
               view_count: ranked.view_count,
+              like_count: ranked.like_count,
+              comment_count: ranked.comment_count,
+              share_count: ranked.share_count,
               reward: prize.reward,
               status: "pending_review",
               review_note: null,

@@ -28,6 +28,9 @@ type LeaderboardResult = {
   reward: string;
   status: string;
   review_note?: string | null;
+  like_count?: number;
+  comment_count?: number;
+  share_count?: number;
 };
 
 type LeaderboardItem = {
@@ -39,6 +42,8 @@ type LeaderboardItem = {
   status: string;
   finalized_at?: number | null;
   review_notes?: string | null;
+  has_reallocation?: boolean;
+  reallocation_count?: number;
   prizes: LeaderboardPrize[];
   results: LeaderboardResult[];
 };
@@ -102,6 +107,48 @@ export default function PageBody({
       }),
     [leaderboards]
   );
+
+  const openedLeaderboard = useMemo(
+    () => leaderboards.find((item) => item.id === openReviewId) || null,
+    [leaderboards, openReviewId]
+  );
+
+  const reallocationChains = useMemo(() => {
+    if (!openedLeaderboard) return [];
+
+    const byPosition = new Map<number, LeaderboardResult[]>();
+
+    for (const result of openedLeaderboard.results) {
+      const list = byPosition.get(result.position) || [];
+      list.push(result);
+      byPosition.set(result.position, list);
+    }
+
+    return Array.from(byPosition.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([position, results]) => {
+        const disqualified = results.filter(
+          (result) => result.status === "disqualified"
+        );
+        const current = results.find(
+          (result) => result.status !== "disqualified"
+        );
+
+        if (disqualified.length === 0) return null;
+
+        const chain = [
+          ...disqualified.map((result) => `${result.username} (descalificado)`),
+          current ? current.username : "Sin reemplazo apto",
+        ];
+
+        return {
+          position,
+          reward: current?.reward || disqualified[0]?.reward || "-",
+          chain,
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  }, [openedLeaderboard]);
 
   const resetForm = () => {
     setForm(EMPTY_FORM);
@@ -204,8 +251,18 @@ export default function PageBody({
 
   const updateResultStatus = async (
     resultId: number,
-    status: "approved" | "rejected" | "prize_delivered"
+    status: "approved" | "rejected" | "prize_delivered" | "disqualified"
   ) => {
+    let reviewNote: string | undefined;
+    if (status === "disqualified") {
+      const provided = window.prompt(
+        "Motivo de descalificacion (opcional):",
+        "Usuario descalificado manualmente"
+      );
+      if (provided === null) return;
+      reviewNote = provided;
+    }
+
     const response = await fetch(
       `/api/admin/tiktok/leaderboards/results/${resultId}`,
       {
@@ -213,7 +270,7 @@ export default function PageBody({
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, review_note: reviewNote }),
       }
     );
 
@@ -415,6 +472,11 @@ export default function PageBody({
                     <Button variant="outline" onClick={() => setOpenReviewId(openReviewId === item.id ? null : item.id)}>
                       Revisar
                     </Button>
+                    {(item.has_reallocation || (item.reallocation_count || 0) > 0) && (
+                      <span className="inline-flex items-center rounded-full bg-amber-500/20 text-amber-300 px-2 py-1 text-xs">
+                        Reajustes: {item.reallocation_count || 0}
+                      </span>
+                    )}
                     {item.status === "in_review" && (
                       <Button variant="outline" onClick={() => setLeaderboardStatus(item.id, "closed")}>
                         Cerrar
@@ -439,8 +501,24 @@ export default function PageBody({
       {openReviewId !== null && (
         <div className="rounded-lg border border-border bg-card p-4">
           <h3 className="text-base font-semibold">Revision manual de resultados</h3>
+
+          {reallocationChains.length > 0 && (
+            <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+              <p className="text-sm font-semibold text-amber-300">
+                Cadena de reajuste de puestos
+              </p>
+              <div className="mt-2 space-y-1 text-sm text-amber-200">
+                {reallocationChains.map((item) => (
+                  <p key={`chain-${item.position}`}>
+                    #{item.position} ({item.reward}): {item.chain.join(" -> ")}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="mt-3 space-y-2">
-            {(leaderboards.find((item) => item.id === openReviewId)?.results || []).map((result) => (
+            {(openedLeaderboard?.results || []).map((result) => (
               <div key={result.id} className="rounded-md border border-border p-3">
                 <p className="font-medium">
                   Puesto #{result.position} - {result.username}
@@ -450,11 +528,15 @@ export default function PageBody({
                 </p>
                 <p className="text-sm">Premio: {result.reward}</p>
                 <p className="text-xs text-muted-foreground">Estado: {result.status}</p>
+                {result.review_note && (
+                  <p className="text-xs text-amber-300">Nota: {result.review_note}</p>
+                )}
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => updateResultStatus(result.id, "approved")}
+                    disabled={result.status === "disqualified"}
                   >
                     Aprobar
                   </Button>
@@ -462,19 +544,30 @@ export default function PageBody({
                     size="sm"
                     variant="outline"
                     onClick={() => updateResultStatus(result.id, "rejected")}
+                    disabled={result.status === "disqualified"}
                   >
                     Rechazar
                   </Button>
                   <Button
                     size="sm"
                     onClick={() => updateResultStatus(result.id, "prize_delivered")}
+                    disabled={result.status === "disqualified"}
                   >
                     Marcar entregado
                   </Button>
+                  {result.status !== "disqualified" && (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => updateResultStatus(result.id, "disqualified")}
+                    >
+                      Descalificar
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
-            {(leaderboards.find((item) => item.id === openReviewId)?.results || []).length === 0 && (
+            {(openedLeaderboard?.results || []).length === 0 && (
               <p className="text-sm text-muted-foreground">No hay resultados preparados para revisar.</p>
             )}
           </div>
