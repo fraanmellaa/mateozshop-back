@@ -14,6 +14,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  if (pathname.startsWith("/api/cron/")) {
+    return NextResponse.next();
+  }
+
+  if (pathname.startsWith("/api/extension/")) {
+    return NextResponse.next();
+  }
+
   // RUTAS API: Verificar autenticación
   if (pathname.startsWith("/api/")) {
     // Excepción: login no requiere autenticación

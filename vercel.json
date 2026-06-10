@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/auctions",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/giveaways",
       "schedule": "*/10 * * * *"
     }

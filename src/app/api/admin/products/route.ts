@@ -17,7 +17,19 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, description, image, price, stock, sendable, codes } = body;
+    const {
+      name,
+      description,
+      image,
+      price,
+      stock,
+      sendable,
+      codes,
+      is_auction,
+      min_bid_increment,
+      auction_ends_at,
+      auction_cooldown_seconds,
+    } = body;
 
     if (
       !name ||
@@ -39,12 +51,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (Boolean(is_auction) && !auction_ends_at) {
+      return NextResponse.json(
+        { error: "Las subastas deben tener fecha límite" },
+        { status: 400 }
+      );
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const parsedAuctionEndsAt =
+      auction_ends_at === null || auction_ends_at === undefined
+        ? null
+        : parseInt(auction_ends_at);
+    const auctionDurationSeconds = parsedAuctionEndsAt
+      ? Math.max(30, parsedAuctionEndsAt - now)
+      : 3600;
+
     const product = await createProduct({
       name,
       description,
       image,
       price: parseInt(price),
       stock: parseInt(stock),
+      is_auction: Boolean(is_auction),
+      min_bid_increment: Math.max(1, parseInt(min_bid_increment || 1)),
+      auction_ends_at: parsedAuctionEndsAt,
+      auction_duration_seconds: auctionDurationSeconds,
+      auction_cooldown_seconds: Math.max(
+        10,
+        parseInt(auction_cooldown_seconds || 300)
+      ),
       sendable: Boolean(sendable),
       codes: codes || [],
     });

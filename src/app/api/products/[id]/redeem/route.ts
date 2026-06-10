@@ -62,6 +62,13 @@ export async function POST(
     );
   }
 
+  if (product.is_auction) {
+    return NextResponse.json(
+      { success: false, error: "AUCTION_PRODUCT_USE_BID" },
+      { status: 400 }
+    );
+  }
+
   if (actualPoints < product.price) {
     return NextResponse.json(
       { success: false, error: "NOT_ENOUGH_POINTS" },

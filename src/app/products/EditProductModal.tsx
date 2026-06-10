@@ -34,6 +34,10 @@ export default function EditProductModal({
     image: "",
     price: "",
     stock: "",
+    is_auction: false,
+    min_bid_increment: "1",
+    auction_cooldown_seconds: "300",
+    auction_ends_at: "",
     sendable: false,
     codesText: "",
   });
@@ -47,6 +51,12 @@ export default function EditProductModal({
         image: product.image,
         price: product.price.toString(),
         stock: product.stock.toString(),
+        is_auction: product.is_auction || false,
+        min_bid_increment: String(product.min_bid_increment || 1),
+        auction_cooldown_seconds: String(product.auction_cooldown_seconds || 300),
+        auction_ends_at: product.auction_ends_at
+          ? new Date(product.auction_ends_at * 1000).toISOString().slice(0, 16)
+          : "",
         sendable: product.sendable || false,
         codesText: (product.codes || []).join("\n"),
       });
@@ -75,6 +85,12 @@ export default function EditProductModal({
           image: formData.image,
           price: formData.price,
           stock: formData.stock,
+          is_auction: formData.is_auction,
+          min_bid_increment: formData.min_bid_increment,
+          auction_cooldown_seconds: formData.auction_cooldown_seconds,
+          auction_ends_at: formData.auction_ends_at
+            ? Math.floor(new Date(formData.auction_ends_at).getTime() / 1000)
+            : null,
           sendable: formData.sendable,
           codes,
         }),
@@ -101,6 +117,10 @@ export default function EditProductModal({
       image: "",
       price: "",
       stock: "",
+      is_auction: false,
+      min_bid_increment: "1",
+      auction_cooldown_seconds: "300",
+      auction_ends_at: "",
       sendable: false,
       codesText: "",
     });
@@ -182,6 +202,67 @@ export default function EditProductModal({
               required
             />
           </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right">Modo Puja</Label>
+            <div className="col-span-3 flex items-center gap-2">
+              <Checkbox
+                checked={formData.is_auction}
+                onCheckedChange={(v) =>
+                  setFormData({ ...formData, is_auction: Boolean(v) })
+                }
+              />
+              <span className="text-sm">Activar subasta en tiempo real</span>
+            </div>
+          </div>
+
+          {formData.is_auction && (
+            <>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label className="text-right">Incremento Mínimo</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  className="col-span-3"
+                  value={formData.min_bid_increment}
+                  onChange={(e) =>
+                    setFormData({ ...formData, min_bid_increment: e.target.value })
+                  }
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label className="text-right">Cooldown (seg)</Label>
+                <Input
+                  type="number"
+                  min={10}
+                  className="col-span-3"
+                  value={formData.auction_cooldown_seconds}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      auction_cooldown_seconds: e.target.value,
+                    })
+                  }
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label className="text-right">Fin de Puja</Label>
+                <Input
+                  type="datetime-local"
+                  className="col-span-3"
+                  value={formData.auction_ends_at}
+                  onChange={(e) =>
+                    setFormData({ ...formData, auction_ends_at: e.target.value })
+                  }
+                  required
+                />
+              </div>
+            </>
+          )}
 
           <div className="grid grid-cols-4 items-center gap-4">
             <Label className="text-right">Enviable</Label>

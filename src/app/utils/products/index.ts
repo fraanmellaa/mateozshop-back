@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db/drizzle";
-import { products } from "@/db/schema";
+import { products, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 export type ProductRow = {
@@ -11,6 +11,19 @@ export type ProductRow = {
   image: string;
   price: number;
   stock: number;
+  is_auction: boolean;
+  min_bid_increment: number;
+  auction_ends_at: number | null;
+  auction_duration_seconds: number;
+  auction_cooldown_seconds: number;
+  auction_reopens_at: number | null;
+  auction_round: number;
+  auction_status: string;
+  auction_prize_assigned: boolean;
+  current_bid: number;
+  current_bidder_user_id: number | null;
+  current_bidder_username?: string | null;
+  current_bidder_image?: string | null;
   codes: string[];
   used_codes: string[];
   sendable: boolean;
@@ -18,7 +31,35 @@ export type ProductRow = {
 };
 
 export const getProducts = async (): Promise<ProductRow[]> => {
-  const productsData = await db.select().from(products).limit(10000);
+  const productsData = await db
+    .select({
+      id: products.id,
+      name: products.name,
+      description: products.description,
+      image: products.image,
+      price: products.price,
+      stock: products.stock,
+      is_auction: products.is_auction,
+      min_bid_increment: products.min_bid_increment,
+      auction_ends_at: products.auction_ends_at,
+      auction_duration_seconds: products.auction_duration_seconds,
+      auction_cooldown_seconds: products.auction_cooldown_seconds,
+      auction_reopens_at: products.auction_reopens_at,
+      auction_round: products.auction_round,
+      auction_status: products.auction_status,
+      auction_prize_assigned: products.auction_prize_assigned,
+      current_bid: products.current_bid,
+      current_bidder_user_id: products.current_bidder_user_id,
+      current_bidder_username: users.username,
+      current_bidder_image: users.image,
+      codes: products.codes,
+      used_codes: products.used_codes,
+      sendable: products.sendable,
+      created_at: products.created_at,
+    })
+    .from(products)
+    .leftJoin(users, eq(products.current_bidder_user_id, users.id))
+    .limit(10000);
 
   // Normalize created_at to number if needed
   return productsData.map((p: ProductRow) => ({
@@ -35,6 +76,11 @@ export const createProduct = async (data: {
   image: string;
   price: number;
   stock: number;
+  is_auction?: boolean;
+  min_bid_increment?: number;
+  auction_ends_at?: number | null;
+  auction_duration_seconds?: number;
+  auction_cooldown_seconds?: number;
   sendable?: boolean;
   codes?: string[];
 }) => {
@@ -48,6 +94,17 @@ export const createProduct = async (data: {
       image: data.image,
       price: data.price,
       stock: data.stock,
+      is_auction: data.is_auction ?? false,
+      min_bid_increment: data.min_bid_increment ?? 1,
+      auction_ends_at: data.auction_ends_at ?? null,
+      auction_duration_seconds: data.auction_duration_seconds ?? 3600,
+      auction_cooldown_seconds: data.auction_cooldown_seconds ?? 300,
+      auction_reopens_at: null,
+      auction_round: 1,
+      auction_status: "in_progress",
+      auction_prize_assigned: false,
+      current_bid: data.is_auction ? data.price : 0,
+      current_bidder_user_id: null,
       sendable: data.sendable ?? false,
       codes: data.sendable ? data.codes || [] : [],
       used_codes: [],
@@ -84,6 +141,17 @@ export const updateProduct = async (
     description: string;
     price: number;
     stock: number;
+    is_auction: boolean;
+    min_bid_increment: number;
+    auction_ends_at: number | null;
+    auction_duration_seconds: number;
+    auction_cooldown_seconds: number;
+    auction_reopens_at: number | null;
+    auction_round: number;
+    auction_status: string;
+    auction_prize_assigned: boolean;
+    current_bid: number;
+    current_bidder_user_id: number | null;
     sendable: boolean;
     codes: string[];
     used_codes: string[];
@@ -106,8 +174,33 @@ export const updateProduct = async (
 
 export const getProductById = async (productId: number) => {
   const product = await db
-    .select()
+    .select({
+      id: products.id,
+      name: products.name,
+      description: products.description,
+      image: products.image,
+      price: products.price,
+      stock: products.stock,
+      is_auction: products.is_auction,
+      min_bid_increment: products.min_bid_increment,
+      auction_ends_at: products.auction_ends_at,
+      auction_duration_seconds: products.auction_duration_seconds,
+      auction_cooldown_seconds: products.auction_cooldown_seconds,
+      auction_reopens_at: products.auction_reopens_at,
+      auction_round: products.auction_round,
+      auction_status: products.auction_status,
+      auction_prize_assigned: products.auction_prize_assigned,
+      current_bid: products.current_bid,
+      current_bidder_user_id: products.current_bidder_user_id,
+      current_bidder_username: users.username,
+      current_bidder_image: users.image,
+      codes: products.codes,
+      used_codes: products.used_codes,
+      sendable: products.sendable,
+      created_at: products.created_at,
+    })
     .from(products)
+    .leftJoin(users, eq(products.current_bidder_user_id, users.id))
     .where(eq(products.id, productId))
     .limit(1)
     .execute();

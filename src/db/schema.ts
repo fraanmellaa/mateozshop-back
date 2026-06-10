@@ -26,9 +26,46 @@ export const products = pgTable("products", {
   image: text("image").notNull(),
   price: integer("price").notNull(),
   stock: integer("stock").notNull().default(0),
+  is_auction: boolean("is_auction").notNull().default(false),
+  min_bid_increment: integer("min_bid_increment").notNull().default(1),
+  auction_ends_at: integer("auction_ends_at"),
+  auction_duration_seconds: integer("auction_duration_seconds")
+    .notNull()
+    .default(3600),
+  auction_cooldown_seconds: integer("auction_cooldown_seconds")
+    .notNull()
+    .default(300),
+  auction_reopens_at: integer("auction_reopens_at"),
+  auction_round: integer("auction_round").notNull().default(1),
+  auction_status: text("auction_status").notNull().default("in_progress"),
+  auction_prize_assigned: boolean("auction_prize_assigned")
+    .notNull()
+    .default(false),
+  current_bid: integer("current_bid").notNull().default(0),
+  current_bidder_user_id: integer("current_bidder_user_id"),
   codes: jsonb("codes").notNull().default("[]").$type<string[]>(),
   used_codes: jsonb("used_codes").notNull().default("[]").$type<string[]>(),
   sendable: boolean("sendable").notNull().default(false),
+  created_at: integer("created_at").notNull(),
+});
+
+export const product_bids = pgTable("product_bids", {
+  id: integer("id").primaryKey().unique().generatedAlwaysAsIdentity(),
+  product_id: integer("product_id")
+    .notNull()
+    .references(() => products.id, {
+      onDelete: "cascade",
+      onUpdate: "cascade",
+    }),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, {
+      onDelete: "cascade",
+      onUpdate: "cascade",
+    }),
+  amount: integer("amount").notNull(),
+  auction_round: integer("auction_round").notNull().default(1),
+  status: text("status").notNull().default("in_progress"),
   created_at: integer("created_at").notNull(),
 });
 
