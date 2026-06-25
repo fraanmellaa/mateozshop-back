@@ -1,18 +1,26 @@
 "use server";
 
-import { db } from "@/db/drizzle";
-import { orders } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { createClient } from "@supabase/supabase-js";
 import { sendCustomEmail } from "../email";
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    db: { schema: "mateoz" },
+  }
+);
 
 export async function updateOrderStatus(orderId: number, status: number) {
   try {
-    await db
-      .update(orders)
-      .set({
-        status,
-      })
-      .where(eq(orders.id, orderId));
+    const { error } = await supabase
+      .from("orders")
+      .update({ status })
+      .eq("id", orderId);
+
+    if (error) {
+      throw error;
+    }
 
     return { success: true };
   } catch (error) {

@@ -1,8 +1,14 @@
-import { db } from "@/db/drizzle";
-import { user_tiktok_accounts, user_tiktok_videos } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { createClient } from "@supabase/supabase-js";
 import jwt from "jsonwebtoken";
 import { createHash, randomBytes } from "crypto";
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    db: { schema: "mateoz" },
+  }
+);
 
 const TIKTOK_OAUTH_BASE = "https://www.tiktok.com/v2/auth/authorize/";
 const TIKTOK_OPEN_API_BASE = "https://open.tiktokapis.com";
@@ -193,10 +199,15 @@ export async function refreshTikTokTokens(refreshToken: string) {
 }
 
 export async function getUserTikTokConnection(userId: number) {
-  const results = await db
-    .select()
-    .from(user_tiktok_accounts)
-    .where(eq(user_tiktok_accounts.user_id, userId));
+  const { data: results, error } = await supabase
+    .from("user_tiktok_accounts")
+    .select("*")
+    .eq("user_id", userId)
+    .limit(1);
+
+  if (error) {
+    throw error;
+  }
 
   return results[0] ?? null;
 }
@@ -211,9 +222,7 @@ export async function saveTikTokConnection(params: {
   const accessTokenExpiresAt = now + params.tokens.expires_in;
   const refreshTokenExpiresAt = now + params.tokens.refresh_expires_in;
 
-  const created = await db
-    .insert(user_tiktok_accounts)
-    .values({
+  const payload = {
       user_id: params.userId,
       open_id: params.tokens.open_id,
       union_id: params.profile?.union_id || null,
@@ -229,26 +238,16 @@ export async function saveTikTokConnection(params: {
       created_at: now,
       updated_at: now,
       last_synced_at: now,
-    })
-    .onConflictDoUpdate({
-      target: user_tiktok_accounts.user_id,
-      set: {
-        open_id: params.tokens.open_id,
-        union_id: params.profile?.union_id || null,
-        display_name: params.profile?.display_name || null,
-        username: params.profile?.username || null,
-        avatar_url: params.profile?.avatar_url || null,
-        profile_deep_link: params.profile?.profile_deep_link || null,
-        scope: params.tokens.scope,
-        access_token: params.tokens.access_token,
-        refresh_token: params.tokens.refresh_token,
-        access_token_expires_at: accessTokenExpiresAt,
-        refresh_token_expires_at: refreshTokenExpiresAt,
-        updated_at: now,
-        last_synced_at: now,
-      },
-    })
-    .returning();
+    };
+
+  const { data: created, error } = await supabase
+    .from("user_tiktok_accounts")
+    .upsert(payload, { onConflict: "user_id" })
+    .select("*");
+
+  if (error) {
+    throw error;
+  }
 
   return created[0] ?? null;
 }
@@ -268,9 +267,9 @@ export async function getValidTikTokAccessToken(userId: number) {
 
   const refreshed = await refreshTikTokTokens(connection.refresh_token);
 
-  await db
-    .update(user_tiktok_accounts)
-    .set({
+  const { error } = await supabase
+    .from("user_tiktok_accounts")
+    .update({
       access_token: refreshed.access_token,
       refresh_token: refreshed.refresh_token,
       scope: refreshed.scope,
@@ -279,7 +278,11 @@ export async function getValidTikTokAccessToken(userId: number) {
       updated_at: now,
       last_synced_at: now,
     })
-    .where(eq(user_tiktok_accounts.user_id, userId));
+    .eq("user_id", userId);
+
+  if (error) {
+    throw error;
+  }
 
   return refreshed.access_token;
 }
@@ -483,9 +486,7 @@ export async function upsertAssociatedTikTokVideo(params: {
 }) {
   const now = Math.floor(Date.now() / 1000);
 
-  const result = await db
-    .insert(user_tiktok_videos)
-    .values({
+  const payload = {
       user_id: params.userId,
       video_id: params.videoId,
       title: params.title,
@@ -498,41 +499,44 @@ export async function upsertAssociatedTikTokVideo(params: {
       associated_at: now,
       created_at: params.createdAt || now,
       updated_at: now,
-    })
-    .onConflictDoUpdate({
-      target: user_tiktok_videos.video_id,
-      set: {
-        user_id: params.userId,
-        title: params.title,
-        cover_image_url: params.coverImageUrl || null,
-        share_url: params.shareUrl || null,
-        like_count: params.likeCount || 0,
-        view_count: params.viewCount || 0,
-        comment_count: params.commentCount || 0,
-        share_count: params.shareCount || 0,
-        associated_at: now,
-        updated_at: now,
-      },
-    })
-    .returning();
+    };
+
+  const { data: result, error } = await supabase
+    .from("user_tiktok_videos")
+    .upsert(payload, { onConflict: "video_id" })
+    .select("*");
+
+  if (error) {
+    throw error;
+  }
 
   return result[0] ?? null;
 }
 
 export async function getAssociatedTikTokVideos(userId: number) {
-  return db
-    .select()
-    .from(user_tiktok_videos)
-    .where(eq(user_tiktok_videos.user_id, userId))
-    .orderBy(desc(user_tiktok_videos.created_at));
+  const { data, error } = await supabase
+    .from("user_tiktok_videos")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
 }
 
 export async function refreshAssociatedTikTokVideoStatsByRowId(videoRowId: number) {
-  const rows = await db
-    .select()
-    .from(user_tiktok_videos)
-    .where(eq(user_tiktok_videos.id, videoRowId))
+  const { data: rows, error: rowError } = await supabase
+    .from("user_tiktok_videos")
+    .select("*")
+    .eq("id", videoRowId)
     .limit(1);
+
+  if (rowError) {
+    throw rowError;
+  }
 
   const video = rows[0];
   if (!video) {
@@ -551,9 +555,9 @@ export async function refreshAssociatedTikTokVideoStatsByRowId(videoRowId: numbe
 
   const now = Math.floor(Date.now() / 1000);
 
-  await db
-    .update(user_tiktok_videos)
-    .set({
+  const { error: updateError } = await supabase
+    .from("user_tiktok_videos")
+    .update({
       title: detail.title || video.title,
       cover_image_url: detail.cover_image_url || video.cover_image_url,
       share_url: detail.share_url || video.share_url,
@@ -563,7 +567,11 @@ export async function refreshAssociatedTikTokVideoStatsByRowId(videoRowId: numbe
       share_count: detail.share_count,
       updated_at: now,
     })
-    .where(eq(user_tiktok_videos.id, videoRowId));
+    .eq("id", videoRowId);
+
+  if (updateError) {
+    throw updateError;
+  }
 
   return {
     updated: true,
@@ -597,9 +605,9 @@ export async function refreshAssociatedTikTokVideosStats(userId: number) {
         return;
       }
 
-      await db
-        .update(user_tiktok_videos)
-        .set({
+      const { error: updateError } = await supabase
+        .from("user_tiktok_videos")
+        .update({
           title: detail.title || video.title,
           cover_image_url: detail.cover_image_url || video.cover_image_url,
           share_url: detail.share_url || video.share_url,
@@ -609,7 +617,11 @@ export async function refreshAssociatedTikTokVideosStats(userId: number) {
           share_count: detail.share_count,
           updated_at: now,
         })
-        .where(eq(user_tiktok_videos.video_id, video.video_id));
+        .eq("video_id", video.video_id);
+
+      if (updateError) {
+        throw updateError;
+      }
 
       updated += 1;
     })
@@ -653,9 +665,14 @@ export async function unlinkTikTokAccount(userId: number) {
     return false;
   }
 
-  await db
-    .delete(user_tiktok_accounts)
-    .where(eq(user_tiktok_accounts.user_id, userId));
+  const { error } = await supabase
+    .from("user_tiktok_accounts")
+    .delete()
+    .eq("user_id", userId);
+
+  if (error) {
+    throw error;
+  }
 
   return true;
 }

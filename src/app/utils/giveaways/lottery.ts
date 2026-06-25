@@ -1,63 +1,53 @@
 "use server";
 
-import { db } from "@/db/drizzle";
-import { giveaways, giveaways_entries, users } from "@/db/schema";
-import { eq, isNull, and, lte } from "drizzle-orm";
+import { createClient } from "@supabase/supabase-js";
 import { publishUserNotification } from "@/app/utils/realtime";
 
-/**
- * Función para realizar un sorteo y seleccionar un ganador
- * @param giveawayId - ID del sorteo
- * @returns El ganador seleccionado o null si no hay participantes
- */
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    db: { schema: "mateoz" },
+  }
+);
+
 export const performGiveawayLottery = async (giveawayId: number) => {
   try {
-    // Verificar que el sorteo existe y no tiene ganador aún
-    const giveaway = await db
-      .select()
-      .from(giveaways)
-      .where(eq(giveaways.id, giveawayId))
-      .execute();
+    const { data: giveawayRows, error: giveawayError } = await supabase
+      .from("giveaways")
+      .select("*")
+      .eq("id", giveawayId)
+      .limit(1);
 
-    if (!giveaway.length) {
+    if (giveawayError) throw giveawayError;
+
+    const giveaway = giveawayRows?.[0];
+    if (!giveaway) {
       throw new Error(`Sorteo con ID ${giveawayId} no encontrado`);
     }
 
-    if (giveaway[0].is_closed) {
+    if (giveaway.is_closed) {
       throw new Error(`El sorteo ${giveawayId} ya esta cerrado`);
     }
 
-    if (giveaway[0].winner) {
+    if (giveaway.winner) {
       throw new Error(`El sorteo ${giveawayId} ya tiene un ganador`);
     }
 
-    // Obtener todas las entradas del sorteo
-    const entries = await db
-      .select({
-        userId: giveaways_entries.user_id,
-        discordId: users.discord_id,
-        username: users.username,
-        image: users.image,
-        kickId: users.kick_id,
-      })
-      .from(giveaways_entries)
-      .innerJoin(users, eq(giveaways_entries.user_id, users.id))
-      .where(eq(giveaways_entries.giveaway_id, giveawayId))
-      .execute();
+    const { data: entries, error: entriesError } = await supabase
+      .from("giveaways_entries")
+      .select("user_id, user:users!giveaways_entries_user_id_fkey(discord_id, username, image, kick_id)")
+      .eq("giveaway_id", giveawayId);
 
-    if (entries.length === 0) {
-      await db
-        .update(giveaways)
-        .set({
-          winner: null,
-          is_closed: true,
-        })
-        .where(eq(giveaways.id, giveawayId))
-        .execute();
+    if (entriesError) throw entriesError;
 
-      console.log(
-        `⚪ Sorteo ${giveawayId} cerrado sin ganador (sin participantes)`
-      );
+    if (!entries || entries.length === 0) {
+      const { error: closeError } = await supabase
+        .from("giveaways")
+        .update({ winner: null, is_closed: true })
+        .eq("id", giveawayId);
+
+      if (closeError) throw closeError;
 
       return {
         success: true,
@@ -69,22 +59,29 @@ export const performGiveawayLottery = async (giveawayId: number) => {
       };
     }
 
-    // Realizar el sorteo - seleccionar un ganador aleatorio
-    const randomIndex = Math.floor(Math.random() * entries.length);
-    const winner = entries[randomIndex];
+    const normalizedEntries = entries.map((entry) => {
+      const user = Array.isArray(entry.user) ? entry.user[0] : entry.user;
+      return {
+        userId: entry.user_id,
+        discordId: user?.discord_id as string | null,
+        username: user?.username as string | null,
+        image: user?.image as string | null,
+        kickId: user?.kick_id as string | null,
+      };
+    });
 
-    // Actualizar el sorteo con el ganador
-    await db
-      .update(giveaways)
-      .set({
-        winner: winner.userId,
-        is_closed: true,
-      })
-      .where(eq(giveaways.id, giveawayId))
-      .execute();
+    const randomIndex = Math.floor(Math.random() * normalizedEntries.length);
+    const winner = normalizedEntries[randomIndex];
+
+    const { error: winnerUpdateError } = await supabase
+      .from("giveaways")
+      .update({ winner: winner.userId, is_closed: true })
+      .eq("id", giveawayId);
+
+    if (winnerUpdateError) throw winnerUpdateError;
 
     const uniqueParticipants = Array.from(
-      new Map(entries.map((entry) => [entry.userId, entry])).values()
+      new Map(normalizedEntries.map((entry) => [entry.userId, entry])).values()
     );
 
     for (const participant of uniqueParticipants) {
@@ -95,10 +92,10 @@ export const performGiveawayLottery = async (giveawayId: number) => {
           discordId: participant.discordId,
           type: "giveaway_won",
           title: "Has ganado el sorteo",
-          body: `Enhorabuena, has ganado \"${giveaway[0].title}\".`,
+          body: `Enhorabuena, has ganado \"${giveaway.title}\".`,
           giveawayId,
-          giveawayTitle: giveaway[0].title,
-          giveawayImage: giveaway[0].image,
+          giveawayTitle: giveaway.title,
+          giveawayImage: giveaway.image,
           targetUrl: `/sorteos/${giveawayId}`,
         });
         continue;
@@ -108,17 +105,13 @@ export const performGiveawayLottery = async (giveawayId: number) => {
         discordId: participant.discordId,
         type: "giveaway_finished",
         title: "Sorteo finalizado",
-        body: `El sorteo \"${giveaway[0].title}\" ha terminado.`,
+        body: `El sorteo \"${giveaway.title}\" ha terminado.`,
         giveawayId,
-        giveawayTitle: giveaway[0].title,
-        giveawayImage: giveaway[0].image,
+        giveawayTitle: giveaway.title,
+        giveawayImage: giveaway.image,
         targetUrl: "/mi-cuenta/sorteos",
       });
     }
-
-    console.log(
-      `🎉 Sorteo ${giveawayId} completado. Ganador: ${winner.username} (ID: ${winner.userId})`
-    );
 
     return {
       success: true,
@@ -130,7 +123,7 @@ export const performGiveawayLottery = async (giveawayId: number) => {
         kickId: winner.kickId,
       },
       notifiedParticipants: uniqueParticipants.length,
-      totalParticipants: entries.length,
+      totalParticipants: normalizedEntries.length,
     };
   } catch (error) {
     console.error(`Error al realizar sorteo ${giveawayId}:`, error);
@@ -142,49 +135,27 @@ export const performGiveawayLottery = async (giveawayId: number) => {
   }
 };
 
-/**
- * Función para revisar y procesar todos los sorteos que han finalizado
- * @returns Array con los resultados de todos los sorteos procesados
- */
 export const processFinishedGiveaways = async () => {
   try {
     const now = Math.floor(Date.now() / 1000);
 
-    // Buscar sorteos finalizados que aun no fueron cerrados por el lottery
-    const finishedGiveaways = await db
-      .select({
-        id: giveaways.id,
-        title: giveaways.title,
-        end_at: giveaways.end_at,
-      })
-      .from(giveaways)
-      .where(
-        and(
-          lte(giveaways.end_at, now),
-          isNull(giveaways.winner),
-          eq(giveaways.is_closed, false)
-        )
-      )
-      .execute();
+    const { data: finishedGiveaways, error } = await supabase
+      .from("giveaways")
+      .select("id, title, end_at, winner, is_closed")
+      .lte("end_at", now)
+      .is("winner", null)
+      .eq("is_closed", false);
 
-    if (finishedGiveaways.length === 0) {
-      console.log("No hay sorteos pendientes para procesar");
+    if (error) throw error;
+
+    if (!finishedGiveaways || finishedGiveaways.length === 0) {
       return [];
     }
 
-    console.log(
-      `Encontrados ${finishedGiveaways.length} sorteos para procesar`
-    );
-
-    // Procesar cada sorteo
     const results = [];
     for (const giveaway of finishedGiveaways) {
-      console.log(`Procesando sorteo: ${giveaway.title} (ID: ${giveaway.id})`);
       const result = await performGiveawayLottery(giveaway.id);
       results.push(result);
-
-      // Pequeño delay entre sorteos para evitar problemas de concurrencia
-      await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
     return results;
@@ -194,41 +165,29 @@ export const processFinishedGiveaways = async () => {
   }
 };
 
-/**
- * Función para obtener estadísticas de sorteos
- */
 export const getGiveawayStats = async () => {
   try {
     const now = Math.floor(Date.now() / 1000);
 
-    const stats = await db.select().from(giveaways).execute();
+    const { data: stats, error } = await supabase.from("giveaways").select("*");
+    if (error) throw error;
 
-    const active = stats.filter((g) => g.start_at <= now && g.end_at > now);
-    const finished = stats.filter(
+    const active = (stats || []).filter((g) => g.start_at <= now && g.end_at > now);
+    const finished = (stats || []).filter(
       (g) => g.end_at <= now && (Boolean(g.winner) || g.is_closed)
     );
-    const pending = stats.filter(
-      (g) => g.end_at <= now && !g.winner && !g.is_closed
-    );
-    const upcoming = stats.filter((g) => g.start_at > now);
+    const pending = (stats || []).filter((g) => g.end_at <= now && !g.winner && !g.is_closed);
+    const upcoming = (stats || []).filter((g) => g.start_at > now);
 
     return {
-      total: stats.length,
+      total: (stats || []).length,
       active: active.length,
       finished: finished.length,
       pending: pending.length,
       upcoming: upcoming.length,
       details: {
-        active: active.map((g) => ({
-          id: g.id,
-          title: g.title,
-          end_at: g.end_at,
-        })),
-        pending: pending.map((g) => ({
-          id: g.id,
-          title: g.title,
-          end_at: g.end_at,
-        })),
+        active: active.map((g) => ({ id: g.id, title: g.title, end_at: g.end_at })),
+        pending: pending.map((g) => ({ id: g.id, title: g.title, end_at: g.end_at })),
       },
     };
   } catch (error) {

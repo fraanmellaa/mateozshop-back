@@ -1,9 +1,7 @@
 import { sendEmail } from "@/app/utils/email";
 import { getProductById } from "@/app/utils/products";
 import { getUserByDiscordId } from "@/app/utils/users";
-import { db } from "@/db/drizzle";
-import { orders, products, users } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 import { z } from "zod";
@@ -11,6 +9,14 @@ import { z } from "zod";
 const bodySchema = z.object({
   discord_id: z.string(),
 });
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    db: { schema: "mateoz" },
+  }
+);
 
 export async function POST(
   request: NextRequest,
@@ -87,36 +93,45 @@ export async function POST(
 
   let order;
   try {
-    await db.transaction(async (tx) => {
-      const newUsedPoints = user.used_points + product.price;
-      await tx
-        .update(users)
-        .set({
-          used_points: newUsedPoints,
-        })
-        .where(eq(users.kick_id, userKickId.toString()))
-        .returning();
+    const newUsedPoints = user.used_points + product.price;
+    const { error: userUpdateError } = await supabase
+      .from("users")
+      .update({ used_points: newUsedPoints })
+      .eq("kick_id", userKickId.toString());
+
+    if (userUpdateError) {
+      throw userUpdateError;
+    }
 
       // Si el producto es sendable, crear el pedido como completado (estado 1)
       // Si no es sendable, crear como pendiente (estado 0)
       const orderStatus = product.sendable ? 1 : 0;
 
-      order = await tx
-        .insert(orders)
-        .values({
-          user_id: user.id,
-          product_id: product.id,
-          status: orderStatus,
-          total: product.price,
-          created_at: Math.floor(Date.now() / 1000), // Timestamp in seconds
-        })
-        .returning();
+    const { data: createdOrder, error: orderError } = await supabase
+      .from("orders")
+      .insert({
+        user_id: user.id,
+        product_id: product.id,
+        status: orderStatus,
+        total: product.price,
+        created_at: Math.floor(Date.now() / 1000),
+      })
+      .select("*");
 
-      await tx
-        .update(products)
-        .set({ stock: product.stock - 1 })
-        .where(eq(products.id, product.id));
-    });
+    if (orderError) {
+      throw orderError;
+    }
+
+    order = createdOrder;
+
+    const { error: productUpdateError } = await supabase
+      .from("products")
+      .update({ stock: product.stock - 1 })
+      .eq("id", product.id);
+
+    if (productUpdateError) {
+      throw productUpdateError;
+    }
   } catch (error) {
     console.error("Error creating order:", error);
     return NextResponse.json(
@@ -133,12 +148,10 @@ export async function POST(
     const newCodes = product.codes.filter((code: string) => code !== firstCode);
     const updatedUsedCodes = [...product.used_codes, firstCode!];
 
-    await db.transaction(async (tx) => {
-      await tx
-        .update(products)
-        .set({ codes: newCodes, used_codes: updatedUsedCodes })
-        .where(eq(products.id, product.id));
-    });
+    await supabase
+      .from("products")
+      .update({ codes: newCodes, used_codes: updatedUsedCodes })
+      .eq("id", product.id);
   } else {
     await sendEmail(email, "PRODUCT_NO_REWARD");
   }

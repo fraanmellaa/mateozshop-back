@@ -1,8 +1,14 @@
 "use server";
 
-import { db } from "@/db/drizzle";
-import { products, users } from "@/db/schema";
-import { and, eq, ne, or } from "drizzle-orm";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    db: { schema: "mateoz" },
+  }
+);
 
 export type ProductRow = {
   id: number;
@@ -41,64 +47,37 @@ export const getProducts = async (
   const includeArchivedAuctions = options?.includeArchivedAuctions ?? false;
   const onlyActiveAuctions = options?.onlyActiveAuctions ?? false;
 
-  const productsData = await db
-    .select({
-      id: products.id,
-      name: products.name,
-      description: products.description,
-      image: products.image,
-      price: products.price,
-      stock: products.stock,
-      is_auction: products.is_auction,
-      min_bid_increment: products.min_bid_increment,
-      auction_ends_at: products.auction_ends_at,
-      auction_duration_seconds: products.auction_duration_seconds,
-      auction_cooldown_seconds: products.auction_cooldown_seconds,
-      auction_parent_product_id: products.auction_parent_product_id,
-      auction_starting_notified: products.auction_starting_notified,
-      auction_reopens_at: products.auction_reopens_at,
-      auction_round: products.auction_round,
-      auction_status: products.auction_status,
-      auction_prize_assigned: products.auction_prize_assigned,
-      current_bid: products.current_bid,
-      current_bidder_user_id: products.current_bidder_user_id,
-      current_bidder_username: users.username,
-      current_bidder_image: users.image,
-      codes: products.codes,
-      used_codes: products.used_codes,
-      sendable: products.sendable,
-      created_at: products.created_at,
-    })
-    .from(products)
-    .where(
-      includeArchivedAuctions
-        ? undefined
-        : onlyActiveAuctions
-          ? or(
-              eq(products.is_auction, false),
-              and(
-                eq(products.is_auction, true),
-                or(
-                  eq(products.auction_status, "in_progress"),
-                  eq(products.auction_status, "finalizing")
-                )
-              )
-            )
-          : or(
-              eq(products.is_auction, false),
-              and(eq(products.is_auction, true), ne(products.auction_status, "archived"))
-            )
-    )
-    .leftJoin(users, eq(products.current_bidder_user_id, users.id))
-    .limit(10000);
+  const { data, error } = await supabase.from("products").select(`
+      *,
+      bidder:users!products_current_bidder_user_id_fkey(username, image)
+    `);
 
-  // Normalize created_at to number if needed
-  return productsData.map((p: ProductRow) => ({
+  if (error) {
+    throw error;
+  }
+
+  let rows = (data || []).map((p) => ({
     ...p,
+    current_bidder_username: p.bidder?.username ?? null,
+    current_bidder_image: p.bidder?.image ?? null,
     codes: p.codes || [],
     used_codes: p.used_codes || [],
-    sendable: p.sendable || false,
+    sendable: Boolean(p.sendable),
   }));
+
+  if (!includeArchivedAuctions) {
+    if (onlyActiveAuctions) {
+      rows = rows.filter(
+        (p) =>
+          !p.is_auction ||
+          (p.is_auction && (p.auction_status === "in_progress" || p.auction_status === "finalizing"))
+      );
+    } else {
+      rows = rows.filter((p) => !p.is_auction || p.auction_status !== "archived");
+    }
+  }
+
+  return rows;
 };
 
 export const createProduct = async (data: {
@@ -120,11 +99,11 @@ export const createProduct = async (data: {
     throw new Error("AUCTION_REQUIRES_STOCK");
   }
 
-  const created_at = Math.floor(Date.now() / 1000); // Current timestamp in seconds
+  const created_at = Math.floor(Date.now() / 1000);
 
-  const result = await db
-    .insert(products)
-    .values({
+  const { data: result, error } = await supabase
+    .from("products")
+    .insert({
       name: data.name,
       description: data.description,
       image: data.image,
@@ -148,28 +127,35 @@ export const createProduct = async (data: {
       used_codes: [],
       created_at,
     })
-    .returning();
+    .select("*");
 
-  return result[0];
+  if (error) {
+    throw error;
+  }
+
+  return result?.[0];
 };
 
 export const deleteProduct = async (productId: number) => {
-  const deletedProduct = await db
-    .delete(products)
-    .where(eq(products.id, productId));
-  return deletedProduct;
+  const { error } = await supabase.from("products").delete().eq("id", productId);
+  if (error) {
+    throw error;
+  }
+  return true;
 };
 
-export const updateProductStock = async (
-  productId: number,
-  newStock: number
-) => {
-  const updatedProduct = await db
-    .update(products)
-    .set({ stock: newStock })
-    .where(eq(products.id, productId))
-    .returning();
-  return updatedProduct[0];
+export const updateProductStock = async (productId: number, newStock: number) => {
+  const { data, error } = await supabase
+    .from("products")
+    .update({ stock: newStock })
+    .eq("id", productId)
+    .select("*");
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.[0];
 };
 
 export const updateProduct = async (
@@ -197,23 +183,22 @@ export const updateProduct = async (
     used_codes: string[];
   }>
 ) => {
-  const existingRows = await db
-    .select({
-      stock: products.stock,
-      is_auction: products.is_auction,
-      auction_status: products.auction_status,
-    })
-    .from(products)
-    .where(eq(products.id, productId))
+  const { data: existingRows, error: existingError } = await supabase
+    .from("products")
+    .select("stock, is_auction, auction_status")
+    .eq("id", productId)
     .limit(1);
 
-  const existing = existingRows[0];
+  if (existingError) {
+    throw existingError;
+  }
+
+  const existing = existingRows?.[0];
   if (!existing) {
     return undefined;
   }
 
-  // If sendable set to false, clear codes/used_codes to avoid stale data
-  const toUpdate: Partial<ProductRow> = { ...updatedFields };
+  const toUpdate: Record<string, unknown> = { ...updatedFields };
   if (updatedFields.sendable === false) {
     toUpdate.codes = [];
     toUpdate.used_codes = [];
@@ -231,54 +216,37 @@ export const updateProduct = async (
     throw new Error("AUCTION_REQUIRES_STOCK");
   }
 
-  const updatedProduct = await db
-    .update(products)
-    .set(toUpdate)
-    .where(eq(products.id, productId))
-    .returning();
-  return updatedProduct[0];
+  const { data, error } = await supabase
+    .from("products")
+    .update(toUpdate)
+    .eq("id", productId)
+    .select("*");
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.[0];
 };
 
 export const getProductById = async (productId: number) => {
-  const product = await db
-    .select({
-      id: products.id,
-      name: products.name,
-      description: products.description,
-      image: products.image,
-      price: products.price,
-      stock: products.stock,
-      is_auction: products.is_auction,
-      min_bid_increment: products.min_bid_increment,
-      auction_ends_at: products.auction_ends_at,
-      auction_duration_seconds: products.auction_duration_seconds,
-      auction_cooldown_seconds: products.auction_cooldown_seconds,
-      auction_parent_product_id: products.auction_parent_product_id,
-      auction_starting_notified: products.auction_starting_notified,
-      auction_reopens_at: products.auction_reopens_at,
-      auction_round: products.auction_round,
-      auction_status: products.auction_status,
-      auction_prize_assigned: products.auction_prize_assigned,
-      current_bid: products.current_bid,
-      current_bidder_user_id: products.current_bidder_user_id,
-      current_bidder_username: users.username,
-      current_bidder_image: users.image,
-      codes: products.codes,
-      used_codes: products.used_codes,
-      sendable: products.sendable,
-      created_at: products.created_at,
-    })
-    .from(products)
-    .leftJoin(users, eq(products.current_bidder_user_id, users.id))
-    .where(eq(products.id, productId))
-    .limit(1)
-    .execute();
+  const { data, error } = await supabase
+    .from("products")
+    .select("*, bidder:users!products_current_bidder_user_id_fkey(username, image)")
+    .eq("id", productId)
+    .limit(1);
 
-  const p = product[0] as ProductRow | undefined;
+  if (error) {
+    throw error;
+  }
+
+  const p = data?.[0];
   if (!p) return null;
 
   return {
     ...p,
+    current_bidder_username: p.bidder?.username ?? null,
+    current_bidder_image: p.bidder?.image ?? null,
     codes: p.codes || [],
     used_codes: p.used_codes || [],
     sendable: p.sendable || false,

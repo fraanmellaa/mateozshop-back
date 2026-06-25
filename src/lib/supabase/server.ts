@@ -19,6 +19,7 @@ export async function createSupabaseServerClient() {
   const { supabaseUrl, supabaseServiceRoleKey } = getSupabaseEnv();
 
   return createServerClient(supabaseUrl, supabaseServiceRoleKey, {
+    db: { schema: "mateoz" },
     cookies: {
       getAll() {
         return cookieStore.getAll();

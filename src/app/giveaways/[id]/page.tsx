@@ -107,7 +107,8 @@ export default async function GiveawayDetailPage({
                     </span>
                     <span className="ml-2">
                       {giveaway.entries.reduce(
-                        (sum, entry) => sum + entry.tickets,
+                        (sum: number, entry: { tickets: number }) =>
+                          sum + entry.tickets,
                         0
                       )}
                     </span>

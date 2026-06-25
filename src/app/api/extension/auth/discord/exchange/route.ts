@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
-import { db } from "@/db/drizzle";
-import { users } from "@/db/schema";
 import { signExtensionToken, validateExtensionKey } from "@/app/utils/extensionAuth";
 import { createUser, getUserByDiscordId } from "@/app/utils/users";
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    db: { schema: "mateoz" },
+  }
+);
 
 const bodySchema = z.object({
   code: z.string().min(1),
@@ -102,15 +108,19 @@ async function upsertUserFromDiscord(me: DiscordUser) {
 
     user = await getUserByDiscordId(me.id);
   } else {
-    const updated = await db
-      .update(users)
-      .set({
+    const { data: updated, error } = await supabase
+      .from("users")
+      .update({
         username: displayName,
         image: avatar,
         email: me.email || user.email,
       })
-      .where(eq(users.discord_id, me.id))
-      .returning();
+      .eq("discord_id", me.id)
+      .select("*");
+
+    if (error) {
+      throw error;
+    }
 
     if (updated.length > 0) {
       const row = updated[0];

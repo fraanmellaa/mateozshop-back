@@ -1,12 +1,22 @@
 "use server";
 
-import { db } from "@/db/drizzle";
-import { eq } from "drizzle-orm";
-import { users } from "@/db/schema";
+import { createClient } from "@supabase/supabase-js";
 import { User } from "./types";
 
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    db: { schema: "mateoz" },
+  }
+);
+
 export const getUsers = async () => {
-  const usersData = await db.select().from(users);
+  const { data: usersData, error } = await supabase.from("users").select("*");
+  if (error) {
+    throw error;
+  }
+
   const usersArray: User[] = usersData.map((user) => ({
     ...user,
     actual_points: user.total_points - user.used_points || 0,
@@ -17,12 +27,16 @@ export const getUsers = async () => {
 };
 
 export const getUserByDiscordId = async (discordId: string) => {
-  const resUser = await db
-    .select()
-    .from(users)
-    .where(eq(users.discord_id, discordId));
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("discord_id", discordId)
+    .limit(1);
+  if (error) {
+    throw error;
+  }
 
-  const userData = resUser.length ? resUser[0] : null;
+  const userData = data.length ? data[0] : null;
 
   if (!userData) {
     return null;
@@ -38,25 +52,29 @@ export const getUserByDiscordId = async (discordId: string) => {
 };
 
 export const updateTotalPoints = async (kickId: string, points: number) => {
-  const updatedUser = await db
-    .update(users)
-    .set({
-      total_points: points,
-    })
-    .where(eq(users.kick_id, kickId.toString()))
-    .returning();
+  const { data: updatedUser, error } = await supabase
+    .from("users")
+    .update({ total_points: points })
+    .eq("kick_id", kickId.toString())
+    .select("*");
+
+  if (error) {
+    throw error;
+  }
 
   return updatedUser.length ? updatedUser[0] : null;
 };
 
 export const updateUsedPoints = async (kickId: string, points: number) => {
-  const updatedUser = await db
-    .update(users)
-    .set({
-      used_points: points,
-    })
-    .where(eq(users.kick_id, kickId.toString()))
-    .returning();
+  const { data: updatedUser, error } = await supabase
+    .from("users")
+    .update({ used_points: points })
+    .eq("kick_id", kickId.toString())
+    .select("*");
+
+  if (error) {
+    throw error;
+  }
 
   return updatedUser.length ? updatedUser[0] : null;
 };
@@ -67,9 +85,7 @@ export const createUser = async (user: {
   profile_picture: string;
   email: string;
 }) => {
-  const createdUser = await db
-    .insert(users)
-    .values({
+  const payload = {
       username: user.name,
       discord_id: user.user_id.toString(),
       kick_id: null,
@@ -78,15 +94,26 @@ export const createUser = async (user: {
       total_points: 0,
       used_points: 0,
       created_at: Math.floor(Date.now() / 1000), // Store as Unix timestamp
-    })
-    .onConflictDoNothing()
-    .returning();
+    };
+
+  const { data: createdUser, error } = await supabase
+    .from("users")
+    .upsert(payload, { onConflict: "discord_id", ignoreDuplicates: true })
+    .select("*");
+
+  if (error) {
+    throw error;
+  }
 
   if (createdUser.length === 0) {
-    const existingUser = await db
-      .select()
-      .from(users)
-      .where(eq(users.discord_id, user.user_id));
+    const { data: existingUser, error: existingError } = await supabase
+      .from("users")
+      .select("*")
+      .eq("discord_id", user.user_id);
+
+    if (existingError) {
+      throw existingError;
+    }
 
     if (existingUser.length > 0) {
       return {
@@ -110,20 +137,31 @@ export const updateUserKickId = async (
   kickId: string,
   kick_username: string
 ) => {
-  const updatedUser = await db
-    .update(users)
-    .set({
+  const { data: updatedUser, error } = await supabase
+    .from("users")
+    .update({
       kick_id: kickId,
-      kick_username: kick_username,
+      kick_username,
     })
-    .where(eq(users.verification_code, verification_code))
-    .returning();
+    .eq("verification_code", verification_code)
+    .select("*");
+
+  if (error) {
+    throw error;
+  }
 
   return updatedUser.length ? updatedUser[0] : null;
 };
 
 export const getUserById = async (userId: number) => {
-  const resUser = await db.select().from(users).where(eq(users.id, userId));
+  const { data: resUser, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", userId);
+
+  if (error) {
+    throw error;
+  }
 
   const userData = resUser.length ? resUser[0] : null;
 

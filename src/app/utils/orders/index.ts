@@ -1,84 +1,73 @@
 "use server";
 
-import { db } from "@/db/drizzle";
-import { orders, products, users } from "@/db/schema";
+import { createClient } from "@supabase/supabase-js";
 import { DecoratedOrder } from "./types";
-import { eq } from "drizzle-orm";
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    db: { schema: "mateoz" },
+  }
+);
 
 export const getOrders = async () => {
-  const ordersArray = await db
-    .select({
-      id: orders.id,
-      status: orders.status,
-      total: orders.total,
-      created_at: orders.created_at,
-      user: {
-        id: users.id,
-        username: users.username,
-        email: users.email,
-      },
-      product: {
-        id: products.id,
-        name: products.name,
-        image: products.image,
-        price: products.price,
-      },
-    })
-    .from(orders)
-    .innerJoin(users, eq(users.id, orders.user_id))
-    .innerJoin(products, eq(products.id, orders.product_id));
+  const { data: ordersArray, error } = await supabase.from("orders").select(`
+      id,
+      status,
+      total,
+      created_at,
+      user:users!orders_user_id_fkey(id, username, email),
+      product:products!orders_product_id_fkey(id, name, image, price)
+    `);
 
-  const decoratedOrders: Array<DecoratedOrder> = ordersArray.map((order) => ({
-    id: order.id,
-    username: order.user.username,
-    product_name: order.product.name,
-    product_image: order.product.image,
-    status: order.status,
-    total: order.total,
-    created_at: new Date(order.created_at * 1000).toISOString(),
-  }));
+  if (error) {
+    throw error;
+  }
+
+  const decoratedOrders: Array<DecoratedOrder> = ordersArray.map((order) => {
+    const user = Array.isArray(order.user) ? order.user[0] : order.user;
+    const product = Array.isArray(order.product) ? order.product[0] : order.product;
+
+    return {
+      id: order.id,
+      username: user?.username ?? "",
+      product_name: product?.name ?? "",
+      product_image: product?.image ?? "",
+      status: order.status,
+      total: order.total,
+      created_at: new Date(order.created_at * 1000).toISOString(),
+    };
+  });
 
   return decoratedOrders;
 };
 
 export const getOrderById = async (orderId: number) => {
-  const orderData = await db
-    .select({
-      id: orders.id,
-      status: orders.status,
-      total: orders.total,
-      created_at: orders.created_at,
-      user: {
-        id: users.id,
-        username: users.username,
-        email: users.email,
-        discord_id: users.discord_id,
-        kick_id: users.kick_id,
-        image: users.image,
-        total_points: users.total_points,
-        used_points: users.used_points,
-      },
-      product: {
-        id: products.id,
-        name: products.name,
-        description: products.description,
-        image: products.image,
-        price: products.price,
-        stock: products.stock,
-        sendable: products.sendable,
-      },
-    })
-    .from(orders)
-    .innerJoin(users, eq(users.id, orders.user_id))
-    .innerJoin(products, eq(products.id, orders.product_id))
-    .where(eq(orders.id, orderId))
-    .execute();
+  const { data: orderData, error } = await supabase
+    .from("orders")
+    .select(`
+      id,
+      status,
+      total,
+      created_at,
+      user:users!orders_user_id_fkey(id, username, email, discord_id, kick_id, image, total_points, used_points),
+      product:products!orders_product_id_fkey(id, name, description, image, price, stock, sendable)
+    `)
+    .eq("id", orderId)
+    .limit(1);
+
+  if (error) {
+    throw error;
+  }
 
   if (!orderData.length) {
     return null;
   }
 
   const order = orderData[0];
+  const user = Array.isArray(order.user) ? order.user[0] : order.user;
+  const product = Array.isArray(order.product) ? order.product[0] : order.product;
 
   return {
     id: order.id,
@@ -86,24 +75,24 @@ export const getOrderById = async (orderId: number) => {
     total: order.total,
     created_at: new Date(order.created_at * 1000).toISOString(),
     user: {
-      id: order.user.id,
-      username: order.user.username,
-      email: order.user.email,
-      discord_id: order.user.discord_id,
-      kick_id: order.user.kick_id,
-      image: order.user.image,
-      total_points: order.user.total_points,
-      used_points: order.user.used_points,
-      available_points: order.user.total_points - order.user.used_points,
+      id: user?.id ?? 0,
+      username: user?.username ?? "",
+      email: user?.email ?? "",
+      discord_id: user?.discord_id ?? "",
+      kick_id: user?.kick_id ?? null,
+      image: user?.image ?? "",
+      total_points: user?.total_points ?? 0,
+      used_points: user?.used_points ?? 0,
+      available_points: (user?.total_points ?? 0) - (user?.used_points ?? 0),
     },
     product: {
-      id: order.product.id,
-      name: order.product.name,
-      description: order.product.description,
-      image: order.product.image,
-      price: order.product.price,
-      stock: order.product.stock,
-      sendable: order.product.sendable,
+      id: product?.id ?? 0,
+      name: product?.name ?? "",
+      description: product?.description ?? "",
+      image: product?.image ?? "",
+      price: product?.price ?? 0,
+      stock: product?.stock ?? 0,
+      sendable: product?.sendable ?? false,
     },
   };
 };
@@ -116,46 +105,48 @@ export const createOrder = async (orderData: {
 }) => {
   const { user_id, product_id, status, total } = orderData;
 
-  const newOrder = await db
-    .insert(orders)
-    .values({
+  const { data: newOrder, error } = await supabase
+    .from("orders")
+    .insert({
       user_id,
       product_id,
       status,
       total,
       created_at: Math.floor(Date.now() / 1000), // Timestamp in seconds
     })
-    .returning();
+    .select("*");
+
+  if (error) {
+    throw error;
+  }
 
   return newOrder;
 };
 
 export const getUserOrders = async (userId: number) => {
-  const ordersArray = await db
-    .select({
-      id: orders.id,
-      status: orders.status,
-      total: orders.total,
-      created_at: orders.created_at,
-      product: {
-        id: products.id,
-        name: products.name,
-        image: products.image,
-        price: products.price,
-      },
-    })
-    .from(orders)
-    .innerJoin(products, eq(products.id, orders.product_id))
-    .where(eq(orders.user_id, userId));
+  const { data: ordersArray, error } = await supabase
+    .from("orders")
+    .select(
+      "id, status, total, created_at, product:products!orders_product_id_fkey(id, name, image, price)"
+    )
+    .eq("user_id", userId);
 
-  const decoratedOrders = ordersArray.map((order) => ({
-    id: order.id,
-    product_name: order.product.name,
-    product_image: order.product.image,
-    cost: order.product.price,
-    status: order.status,
-    created_at: new Date(order.created_at * 1000).toISOString(),
-  }));
+  if (error) {
+    throw error;
+  }
+
+  const decoratedOrders = ordersArray.map((order) => {
+    const product = Array.isArray(order.product) ? order.product[0] : order.product;
+
+    return {
+      id: order.id,
+      product_name: product?.name ?? "",
+      product_image: product?.image ?? "",
+      cost: product?.price ?? 0,
+      status: order.status,
+      created_at: new Date(order.created_at * 1000).toISOString(),
+    };
+  });
 
   return decoratedOrders;
 };

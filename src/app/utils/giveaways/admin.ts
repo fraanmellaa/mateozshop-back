@@ -1,6 +1,12 @@
-import { db } from "@/db/drizzle";
-import { giveaways, users, giveaways_entries } from "@/db/schema";
-import { eq, desc, sql } from "drizzle-orm";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    db: { schema: "mateoz" },
+  }
+);
 
 export interface DecoratedGiveaway {
   id: number;
@@ -20,119 +26,77 @@ export interface DecoratedGiveaway {
 export async function getGiveaways(): Promise<DecoratedGiveaway[]> {
   const now = Math.floor(Date.now() / 1000);
 
-  try {
-    const result = await db
-      .select({
-        id: giveaways.id,
-        title: giveaways.title,
-        image: giveaways.image,
-        cost: giveaways.cost,
-        start_at: giveaways.start_at,
-        end_at: giveaways.end_at,
-        winner: giveaways.winner,
-        winner_username: users.username,
-        winner_image: users.image,
-        participants_count: sql<number>`
-          (SELECT COUNT(*)::int 
-           FROM ${giveaways_entries} 
-           WHERE ${giveaways_entries.giveaway_id} = ${giveaways.id})
-        `.as("participants_count"),
-      })
-      .from(giveaways)
-      .leftJoin(users, eq(giveaways.winner, users.id))
-      .orderBy(desc(giveaways.id));
+  const { data: rows, error } = await supabase
+    .from("giveaways")
+    .select("id, title, image, cost, start_at, end_at, winner")
+    .order("id", { ascending: false });
 
-    return result.map((giveaway) => {
-      let status: "upcoming" | "active" | "finished";
+  if (error) throw error;
 
-      if (now < giveaway.start_at) {
-        status = "upcoming";
-      } else if (now >= giveaway.start_at && now < giveaway.end_at) {
-        status = "active";
-      } else {
-        status = "finished";
-      }
+  const winnerIds = Array.from(
+    new Set((rows || []).map((row) => row.winner).filter((id): id is number => Boolean(id)))
+  );
 
-      return {
-        id: giveaway.id,
-        title: giveaway.title,
-        image: giveaway.image,
-        cost: giveaway.cost,
-        start_at: giveaway.start_at,
-        end_at: giveaway.end_at,
-        winner: giveaway.winner,
-        winner_username: giveaway.winner_username || undefined,
-        winner_image: giveaway.winner_image || undefined,
-        participants_count: giveaway.participants_count,
-        status,
-        created_at: new Date(giveaway.start_at * 1000).toLocaleDateString(
-          "es-ES"
-        ),
-      };
-    });
-  } catch (error) {
-    console.error("Error fetching giveaways:", error);
+  const winnersById = new Map<number, { username: string | null; image: string | null }>();
 
-    // Si falla por columnas faltantes, intenta con una query más básica
-    if (error instanceof Error && error.message.includes("does not exist")) {
-      console.log("🔄 Intentando query básica sin nuevas columnas...");
+  if (winnerIds.length > 0) {
+    const { data: winnerRows, error: winnersError } = await supabase
+      .from("users")
+      .select("id, username, image")
+      .in("id", winnerIds);
 
-      const basicResult = await db
-        .select({
-          id: giveaways.id,
-          title: giveaways.title,
-          image: giveaways.image,
-          cost: giveaways.cost,
-          start_at: giveaways.start_at,
-          end_at: giveaways.end_at,
-          winner: giveaways.winner,
-          winner_username: users.username,
-          winner_image: users.image,
-          participants_count: sql<number>`
-            (SELECT COUNT(*)::int 
-             FROM ${giveaways_entries} 
-             WHERE ${giveaways_entries.giveaway_id} = ${giveaways.id})
-          `.as("participants_count"),
-        })
-        .from(giveaways)
-        .leftJoin(users, eq(giveaways.winner, users.id))
-        .orderBy(desc(giveaways.id));
+    if (winnersError) throw winnersError;
 
-      return basicResult.map((giveaway) => {
-        let status: "upcoming" | "active" | "finished";
-
-        if (now < giveaway.start_at) {
-          status = "upcoming";
-        } else if (now >= giveaway.start_at && now < giveaway.end_at) {
-          status = "active";
-        } else {
-          status = "finished";
-        }
-
-        return {
-          id: giveaway.id,
-          title: giveaway.title,
-          image: giveaway.image,
-          cost: giveaway.cost,
-          start_at: giveaway.start_at,
-          end_at: giveaway.end_at,
-          winner: giveaway.winner,
-          winner_username: giveaway.winner_username || undefined,
-          winner_image: giveaway.winner_image || undefined,
-          participants_count: giveaway.participants_count,
-          sendable: false, // Valor por defecto
-          codes: [], // Valor por defecto
-          used_codes: [], // Valor por defecto
-          status,
-          created_at: new Date(giveaway.start_at * 1000).toLocaleDateString(
-            "es-ES"
-          ),
-        };
+    for (const winner of winnerRows || []) {
+      winnersById.set(winner.id, {
+        username: winner.username,
+        image: winner.image,
       });
     }
-
-    throw error;
   }
+
+  const { data: entries, error: entriesError } = await supabase
+    .from("giveaways_entries")
+    .select("giveaway_id");
+
+  if (entriesError) throw entriesError;
+
+  const participantsCountByGiveaway = new Map<number, number>();
+  for (const entry of entries || []) {
+    participantsCountByGiveaway.set(
+      entry.giveaway_id,
+      (participantsCountByGiveaway.get(entry.giveaway_id) || 0) + 1
+    );
+  }
+
+  return (rows || []).map((giveaway) => {
+    let status: "upcoming" | "active" | "finished";
+
+    if (now < giveaway.start_at) {
+      status = "upcoming";
+    } else if (now >= giveaway.start_at && now < giveaway.end_at) {
+      status = "active";
+    } else {
+      status = "finished";
+    }
+
+    const winnerMeta = giveaway.winner ? winnersById.get(giveaway.winner) : undefined;
+
+    return {
+      id: giveaway.id,
+      title: giveaway.title,
+      image: giveaway.image,
+      cost: giveaway.cost,
+      start_at: giveaway.start_at,
+      end_at: giveaway.end_at,
+      winner: giveaway.winner,
+      winner_username: winnerMeta?.username || undefined,
+      winner_image: winnerMeta?.image || undefined,
+      participants_count: participantsCountByGiveaway.get(giveaway.id) || 0,
+      status,
+      created_at: new Date(giveaway.start_at * 1000).toLocaleDateString("es-ES"),
+    };
+  });
 }
 
 export async function createGiveaway(data: {
@@ -142,18 +106,20 @@ export async function createGiveaway(data: {
   start_at: number;
   end_at: number;
 }) {
-  const result = await db
-    .insert(giveaways)
-    .values({
+  const { data: result, error } = await supabase
+    .from("giveaways")
+    .insert({
       title: data.title,
       image: data.image,
       cost: data.cost,
       start_at: data.start_at,
       end_at: data.end_at,
     })
-    .returning();
+    .select("*");
 
-  return result[0];
+  if (error) throw error;
+
+  return result?.[0];
 }
 
 export async function updateGiveaway(
@@ -169,16 +135,7 @@ export async function updateGiveaway(
     used_codes?: string[];
   }
 ) {
-  const updateData: {
-    title?: string;
-    image?: string;
-    cost?: number;
-    start_at?: number;
-    end_at?: number;
-    sendable?: boolean;
-    codes?: string[];
-    used_codes?: string[];
-  } = {};
+  const updateData: Record<string, unknown> = {};
 
   if (data.title !== undefined) updateData.title = data.title;
   if (data.image !== undefined) updateData.image = data.image;
@@ -187,7 +144,6 @@ export async function updateGiveaway(
   if (data.end_at !== undefined) updateData.end_at = data.end_at;
   if (data.sendable !== undefined) {
     updateData.sendable = data.sendable;
-    // Si cambia a no sendable, limpiar codes
     if (!data.sendable) {
       updateData.codes = [];
       updateData.used_codes = [];
@@ -196,26 +152,32 @@ export async function updateGiveaway(
   if (data.codes !== undefined) updateData.codes = data.codes;
   if (data.used_codes !== undefined) updateData.used_codes = data.used_codes;
 
-  const result = await db
-    .update(giveaways)
-    .set(updateData)
-    .where(eq(giveaways.id, id))
-    .returning();
+  const { data: result, error } = await supabase
+    .from("giveaways")
+    .update(updateData)
+    .eq("id", id)
+    .select("*");
 
-  return result[0];
+  if (error) throw error;
+
+  return result?.[0];
 }
+
 export async function finishGiveaway(id: number) {
   const now = Math.floor(Date.now() / 1000);
 
-  const result = await db
-    .update(giveaways)
-    .set({ end_at: now })
-    .where(eq(giveaways.id, id))
-    .returning();
+  const { data: result, error } = await supabase
+    .from("giveaways")
+    .update({ end_at: now })
+    .eq("id", id)
+    .select("*");
 
-  return result[0];
+  if (error) throw error;
+
+  return result?.[0];
 }
 
 export async function deleteGiveaway(id: number) {
-  await db.delete(giveaways).where(eq(giveaways.id, id));
+  const { error } = await supabase.from("giveaways").delete().eq("id", id);
+  if (error) throw error;
 }

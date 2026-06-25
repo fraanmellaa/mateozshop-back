@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { createClient } from "@supabase/supabase-js";
 
-import { db } from "@/db/drizzle";
-import { product_bids, products, users } from "@/db/schema";
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    db: { schema: "mateoz" },
+  }
+);
 
 export async function GET(
   request: NextRequest,
@@ -19,15 +24,15 @@ export async function GET(
       );
     }
 
-    const productRows = await db
-      .select({
-        id: products.id,
-        is_auction: products.is_auction,
-        auction_round: products.auction_round,
-      })
-      .from(products)
-      .where(eq(products.id, productId))
+    const { data: productRows, error: productError } = await supabase
+      .from("products")
+      .select("id, is_auction, auction_round")
+      .eq("id", productId)
       .limit(1);
+
+    if (productError) {
+      throw productError;
+    }
 
     const product = productRows[0];
 
@@ -45,31 +50,39 @@ export async function GET(
       );
     }
 
-    const bids = await db
-      .select({
-        id: product_bids.id,
-        amount: product_bids.amount,
-        created_at: product_bids.created_at,
-        status: product_bids.status,
-        user_id: users.id,
-        username: users.username,
-        image: users.image,
-      })
-      .from(product_bids)
-      .innerJoin(users, eq(users.id, product_bids.user_id))
-      .where(
-        and(
-          eq(product_bids.product_id, productId),
-          eq(product_bids.auction_round, product.auction_round)
-        )
+    const { data: bids, error: bidsError } = await supabase
+      .from("product_bids")
+      .select(
+        "id, amount, created_at, status, user:users!product_bids_user_id_fkey(id, username, image)"
       )
-      .orderBy(desc(product_bids.created_at), desc(product_bids.id))
+      .eq("product_id", productId)
+      .eq("auction_round", product.auction_round)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .limit(5);
+
+    if (bidsError) {
+      throw bidsError;
+    }
+
+    const normalizedBids = (bids || []).map((bid) => {
+      const user = Array.isArray(bid.user) ? bid.user[0] : bid.user;
+
+      return {
+        id: bid.id,
+        amount: bid.amount,
+        created_at: bid.created_at,
+        status: bid.status,
+        user_id: user?.id ?? null,
+        username: user?.username ?? null,
+        image: user?.image ?? null,
+      };
+    });
 
     return NextResponse.json(
       {
         success: true,
-        data: bids,
+        data: normalizedBids,
       },
       { status: 200 }
     );

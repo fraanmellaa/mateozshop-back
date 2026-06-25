@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
-import { db } from "@/db/drizzle";
-import { users } from "@/db/schema";
 import { validateExtensionKey, verifyExtensionUser } from "@/app/utils/extensionAuth";
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    db: { schema: "mateoz" },
+  }
+);
 
 const bodySchema = z.object({
   amount: z.number().int().positive(),
@@ -34,21 +40,29 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "INVALID_REQUEST_BODY" }, { status: 400 });
   }
 
-  const userRows = await db
-    .select()
-    .from(users)
-    .where(eq(users.discord_id, verified.discordId));
+  const { data: userRows, error: userError } = await supabase
+    .from("users")
+    .select("*")
+    .eq("discord_id", verified.discordId);
+
+  if (userError) {
+    return NextResponse.json({ error: "INTERNAL_SERVER_ERROR" }, { status: 500 });
+  }
 
   const user = userRows[0];
   if (!user) {
     return NextResponse.json({ error: "USER_NOT_FOUND" }, { status: 404 });
   }
 
-  const updated = await db
-    .update(users)
-    .set({ total_points: user.total_points + body.amount })
-    .where(eq(users.discord_id, verified.discordId))
-    .returning();
+  const { data: updated, error: updateError } = await supabase
+    .from("users")
+    .update({ total_points: user.total_points + body.amount })
+    .eq("discord_id", verified.discordId)
+    .select("*");
+
+  if (updateError) {
+    return NextResponse.json({ error: "INTERNAL_SERVER_ERROR" }, { status: 500 });
+  }
 
   if (updated.length === 0) {
     return NextResponse.json({ error: "USER_NOT_FOUND" }, { status: 404 });

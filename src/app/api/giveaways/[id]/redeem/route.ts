@@ -1,8 +1,6 @@
 import { getGiveawayById } from "@/app/utils/giveaways";
 import { getUserByDiscordId } from "@/app/utils/users";
-import { db } from "@/db/drizzle";
-import { giveaways_entries, users } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 import { z } from "zod";
@@ -10,6 +8,14 @@ import { z } from "zod";
 const bodySchema = z.object({
   discord_id: z.string(),
 });
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    db: { schema: "mateoz" },
+  }
+);
 
 export async function POST(
   request: NextRequest,
@@ -79,27 +85,29 @@ export async function POST(
 
   let order;
   try {
-    await db.transaction(async (tx) => {
-      const newUsedPoints = user.used_points + product.cost;
-      await tx
-        .update(users)
-        .set({
-          used_points: newUsedPoints,
-        })
-        .where(eq(users.kick_id, userKickId.toString()))
-        .returning();
+    const newUsedPoints = user.used_points + product.cost;
+    const { error: userUpdateError } = await supabase
+      .from("users")
+      .update({ used_points: newUsedPoints })
+      .eq("kick_id", userKickId.toString());
 
-      order = await tx
-        .insert(giveaways_entries)
-        .values({
-          user_id: user.id,
-          giveaway_id: product.id,
-        })
-        .returning()
-        .then((res) => res[0]);
+    if (userUpdateError) {
+      throw userUpdateError;
+    }
 
-      return order;
-    });
+    const { data: inserted, error: entryError } = await supabase
+      .from("giveaways_entries")
+      .insert({
+        user_id: user.id,
+        giveaway_id: product.id,
+      })
+      .select("*");
+
+    if (entryError) {
+      throw entryError;
+    }
+
+    order = inserted?.[0];
   } catch (error) {
     console.error("Error creating order:", error);
     return NextResponse.json(
