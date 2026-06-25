@@ -3,6 +3,7 @@ import {
   processFinishedGiveaways,
   getGiveawayStats,
 } from "@/app/utils/giveaways/lottery";
+import { purgePastGiveawaysCache } from "@/app/utils/frontendCache";
 
 /**
  * POST /api/giveaways/lottery
@@ -11,12 +12,15 @@ import {
 export async function POST() {
   try {
     const results = await processFinishedGiveaways();
+    const successCount = results.filter((result) => result.success).length;
+    const cachePurge = successCount > 0 ? await purgePastGiveawaysCache() : null;
 
     return NextResponse.json(
       {
         success: true,
         message: `Procesados ${results.length} sorteos`,
         results,
+        cachePurge,
       },
       { status: 200 }
     );

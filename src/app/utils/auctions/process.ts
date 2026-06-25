@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lte, sql } from "drizzle-orm";
 
 import { publishBidUpdated, publishUserNotification } from "@/app/utils/realtime";
 import { db } from "@/db/drizzle";
@@ -492,6 +492,7 @@ export async function processAuctionsTick() {
       and(
         eq(products.is_auction, true),
         eq(products.auction_status, "finalized"),
+        gt(products.stock, 0),
         lte(products.auction_reopens_at, now)
       )
     )

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { performGiveawayLottery } from "@/app/utils/giveaways/lottery";
+import { purgePastGiveawaysCache } from "@/app/utils/frontendCache";
 
 /**
  * POST /api/giveaways/[id]/lottery
@@ -35,11 +36,14 @@ export async function POST(
       );
     }
 
+    const cachePurge = await purgePastGiveawaysCache();
+
     return NextResponse.json(
       {
         success: true,
         message: `Sorteo completado exitosamente`,
         result,
+        cachePurge,
       },
       { status: 200 }
     );

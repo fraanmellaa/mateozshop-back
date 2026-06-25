@@ -66,20 +66,64 @@ export async function PUT(
       used_codes,
     } = body;
 
+    const parsedPrice = price !== undefined ? Number(price) : undefined;
+    const parsedStock = stock !== undefined ? Number(stock) : undefined;
+    const parsedMinBidIncrement =
+      min_bid_increment !== undefined ? Number(min_bid_increment) : undefined;
+    const parsedAuctionCooldownSeconds =
+      auction_cooldown_seconds !== undefined
+        ? Number(auction_cooldown_seconds)
+        : undefined;
+
+    if (
+      parsedPrice !== undefined &&
+      (!Number.isFinite(parsedPrice) || parsedPrice < 0)
+    ) {
+      return NextResponse.json({ error: "Precio inválido" }, { status: 400 });
+    }
+
+    if (
+      parsedStock !== undefined &&
+      (!Number.isFinite(parsedStock) || parsedStock < 0)
+    ) {
+      return NextResponse.json({ error: "Stock inválido" }, { status: 400 });
+    }
+
+    if (
+      parsedMinBidIncrement !== undefined &&
+      (!Number.isFinite(parsedMinBidIncrement) || parsedMinBidIncrement < 1)
+    ) {
+      return NextResponse.json(
+        { error: "Incremento mínimo inválido" },
+        { status: 400 }
+      );
+    }
+
+    if (
+      parsedAuctionCooldownSeconds !== undefined &&
+      (!Number.isFinite(parsedAuctionCooldownSeconds) ||
+        parsedAuctionCooldownSeconds < 10)
+    ) {
+      return NextResponse.json({ error: "Cooldown inválido" }, { status: 400 });
+    }
+
     const updateData: Partial<ProductRow> = {};
     if (name !== undefined) updateData.name = name;
     if (description !== undefined) updateData.description = description;
     if (image !== undefined) updateData.image = image;
-    if (price !== undefined) updateData.price = parseInt(price);
-    if (stock !== undefined) updateData.stock = parseInt(stock);
+    if (parsedPrice !== undefined) updateData.price = Math.floor(parsedPrice);
+    if (parsedStock !== undefined) updateData.stock = Math.floor(parsedStock);
     if (is_auction !== undefined) updateData.is_auction = Boolean(is_auction);
-    if (min_bid_increment !== undefined) {
-      updateData.min_bid_increment = Math.max(1, parseInt(min_bid_increment));
+    if (parsedMinBidIncrement !== undefined) {
+      updateData.min_bid_increment = Math.max(
+        1,
+        Math.floor(parsedMinBidIncrement)
+      );
     }
-    if (auction_cooldown_seconds !== undefined) {
+    if (parsedAuctionCooldownSeconds !== undefined) {
       updateData.auction_cooldown_seconds = Math.max(
         10,
-        parseInt(auction_cooldown_seconds)
+        Math.floor(parsedAuctionCooldownSeconds)
       );
     }
     if (auction_ends_at !== undefined) {
@@ -102,6 +146,8 @@ export async function PUT(
           ? null
           : parseInt(auction_ends_at)
         : existingProduct.auction_ends_at;
+    const nextStock =
+      parsedStock !== undefined ? Math.floor(parsedStock) : existingProduct.stock;
 
     if (nextIsAuction && !nextAuctionEndsAt) {
       return NextResponse.json(
@@ -110,10 +156,17 @@ export async function PUT(
       );
     }
 
+    if (nextIsAuction && nextStock < 1) {
+      return NextResponse.json(
+        { error: "Las subastas deben tener stock mínimo de 1" },
+        { status: 400 }
+      );
+    }
+
     if (is_auction === true) {
       const basePrice =
-        price !== undefined
-          ? parseInt(price)
+        parsedPrice !== undefined
+          ? Math.floor(parsedPrice)
           : existingProduct.price;
       updateData.current_bid =
         existingProduct.current_bid > 0
@@ -133,6 +186,16 @@ export async function PUT(
 
     return NextResponse.json(product);
   } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "AUCTION_REQUIRES_STOCK"
+    ) {
+      return NextResponse.json(
+        { error: "Las subastas deben tener stock mínimo de 1" },
+        { status: 400 }
+      );
+    }
+
     console.error("Error updating product:", error);
     return NextResponse.json(
       { error: "Error interno del servidor" },

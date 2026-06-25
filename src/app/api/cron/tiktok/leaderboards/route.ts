@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { processTikTokLeaderboardsTick } from "@/app/utils/tiktok/leaderboards";
+import { purgePastLeaderboardsCache } from "@/app/utils/frontendCache";
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,10 +20,16 @@ export async function GET(request: NextRequest) {
 
     const result = await processTikTokLeaderboardsTick();
 
+    let cachePurge = null;
+    if ((result.finalized || 0) > 0) {
+      cachePurge = await purgePastLeaderboardsCache();
+    }
+
     return NextResponse.json(
       {
         success: true,
         result,
+        cachePurge,
       },
       { status: 200 }
     );

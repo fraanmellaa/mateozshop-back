@@ -527,6 +527,56 @@ export async function getAssociatedTikTokVideos(userId: number) {
     .orderBy(desc(user_tiktok_videos.created_at));
 }
 
+export async function refreshAssociatedTikTokVideoStatsByRowId(videoRowId: number) {
+  const rows = await db
+    .select()
+    .from(user_tiktok_videos)
+    .where(eq(user_tiktok_videos.id, videoRowId))
+    .limit(1);
+
+  const video = rows[0];
+  if (!video) {
+    return { updated: false, not_found: true, reason: "VIDEO_ROW_NOT_FOUND" };
+  }
+
+  const detail = await fetchTikTokPublicVideoDetail(video.video_id);
+  if (!detail) {
+    return {
+      updated: false,
+      not_found: true,
+      reason: "TIKTOK_VIDEO_NOT_FOUND",
+      video_id: video.video_id,
+    };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+
+  await db
+    .update(user_tiktok_videos)
+    .set({
+      title: detail.title || video.title,
+      cover_image_url: detail.cover_image_url || video.cover_image_url,
+      share_url: detail.share_url || video.share_url,
+      like_count: detail.like_count,
+      view_count: detail.view_count,
+      comment_count: detail.comment_count,
+      share_count: detail.share_count,
+      updated_at: now,
+    })
+    .where(eq(user_tiktok_videos.id, videoRowId));
+
+  return {
+    updated: true,
+    not_found: false,
+    video_id: video.video_id,
+    view_count: detail.view_count,
+    like_count: detail.like_count,
+    comment_count: detail.comment_count,
+    share_count: detail.share_count,
+    updated_at: now,
+  };
+}
+
 export async function refreshAssociatedTikTokVideosStats(userId: number) {
   const associatedVideos = await getAssociatedTikTokVideos(userId);
 

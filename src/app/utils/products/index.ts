@@ -116,6 +116,10 @@ export const createProduct = async (data: {
   sendable?: boolean;
   codes?: string[];
 }) => {
+  if (Boolean(data.is_auction) && data.stock < 1) {
+    throw new Error("AUCTION_REQUIRES_STOCK");
+  }
+
   const created_at = Math.floor(Date.now() / 1000); // Current timestamp in seconds
 
   const result = await db
@@ -193,11 +197,38 @@ export const updateProduct = async (
     used_codes: string[];
   }>
 ) => {
+  const existingRows = await db
+    .select({
+      stock: products.stock,
+      is_auction: products.is_auction,
+      auction_status: products.auction_status,
+    })
+    .from(products)
+    .where(eq(products.id, productId))
+    .limit(1);
+
+  const existing = existingRows[0];
+  if (!existing) {
+    return undefined;
+  }
+
   // If sendable set to false, clear codes/used_codes to avoid stale data
   const toUpdate: Partial<ProductRow> = { ...updatedFields };
   if (updatedFields.sendable === false) {
     toUpdate.codes = [];
     toUpdate.used_codes = [];
+  }
+
+  const nextIsAuction = updatedFields.is_auction ?? existing.is_auction;
+  const nextStatus = updatedFields.auction_status ?? existing.auction_status;
+  const nextStock = updatedFields.stock ?? existing.stock;
+
+  if (nextIsAuction && nextStock < 1) {
+    throw new Error("AUCTION_REQUIRES_STOCK");
+  }
+
+  if (nextStatus === "in_progress" && nextStock < 1) {
+    throw new Error("AUCTION_REQUIRES_STOCK");
   }
 
   const updatedProduct = await db

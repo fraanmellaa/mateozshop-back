@@ -28,7 +28,7 @@ export default function CreateProductModal({
     description: "",
     image: "",
     price: "",
-    stock: "",
+    stock: "1",
     is_auction: false,
     min_bid_increment: "1",
     auction_cooldown_seconds: "300",
@@ -90,7 +90,7 @@ export default function CreateProductModal({
       description: "",
       image: "",
       price: "",
-      stock: "",
+      stock: "1",
       is_auction: false,
       min_bid_increment: "1",
       auction_cooldown_seconds: "300",
@@ -183,7 +183,14 @@ export default function CreateProductModal({
               <Checkbox
                 checked={formData.is_auction}
                 onCheckedChange={(v) =>
-                  setFormData({ ...formData, is_auction: Boolean(v) })
+                  setFormData({
+                    ...formData,
+                    is_auction: Boolean(v),
+                    stock:
+                      Boolean(v) && Number(formData.stock || "0") < 1
+                        ? "1"
+                        : formData.stock,
+                  })
                 }
               />
               <span className="text-sm">Activar subasta en tiempo real</span>
@@ -196,7 +203,7 @@ export default function CreateProductModal({
                 <Label className="text-right">Incremento Mínimo</Label>
                 <Input
                   type="number"
-                  min={1}
+                  min={formData.is_auction ? 1 : 0}
                   className="col-span-3"
                   value={formData.min_bid_increment}
                   onChange={(e) =>

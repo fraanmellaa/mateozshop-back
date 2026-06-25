@@ -294,6 +294,68 @@ export async function getLiveLeaderboardRanking(
     .limit(limit);
 }
 
+export async function getActiveLeaderboardVideoCandidates() {
+  const now = Math.floor(Date.now() / 1000);
+
+  const activeBoards = await db
+    .select({
+      id: tiktok_leaderboards.id,
+      start_at: tiktok_leaderboards.start_at,
+      end_at: tiktok_leaderboards.end_at,
+    })
+    .from(tiktok_leaderboards)
+    .where(
+      and(
+        ne(tiktok_leaderboards.status, "cancelled"),
+        sql`${tiktok_leaderboards.start_at} <= ${now}`,
+        sql`${tiktok_leaderboards.end_at} > ${now}`
+      )
+    );
+
+  if (activeBoards.length === 0) {
+    return [];
+  }
+
+  const candidates = await Promise.all(
+    activeBoards.map(async (board) => {
+      const videos = await db
+        .select({
+          leaderboard_id: sql<number>`${board.id}`,
+          video_row_id: user_tiktok_videos.id,
+          video_id: user_tiktok_videos.video_id,
+          user_id: user_tiktok_videos.user_id,
+        })
+        .from(user_tiktok_videos)
+        .where(
+          and(
+            eq(user_tiktok_videos.is_banned, false),
+            sql`${user_tiktok_videos.associated_at} >= ${board.start_at}`,
+            sql`${user_tiktok_videos.associated_at} <= ${board.end_at}`
+          )
+        )
+        .orderBy(
+          desc(user_tiktok_videos.view_count),
+          asc(user_tiktok_videos.associated_at),
+          asc(user_tiktok_videos.id)
+        );
+
+      return videos;
+    })
+  );
+
+  const unique = new Map<number, (typeof candidates)[number][number]>();
+
+  for (const boardVideos of candidates) {
+    for (const video of boardVideos) {
+      if (!unique.has(video.video_row_id)) {
+        unique.set(video.video_row_id, video);
+      }
+    }
+  }
+
+  return Array.from(unique.values());
+}
+
 export async function getAdminTikTokLeaderboards() {
   const rows = await db
     .select()
@@ -391,6 +453,49 @@ export async function getPublicTikTokLeaderboards() {
   return {
     active: withPayload.filter((row) => row.is_active),
     past: withPayload.filter((row) => !row.is_active),
+  };
+}
+
+export async function getPublicTikTokLeaderboardById(leaderboardId: number) {
+  const now = Math.floor(Date.now() / 1000);
+
+  const rows = await db
+    .select()
+    .from(tiktok_leaderboards)
+    .where(
+      and(
+        eq(tiktok_leaderboards.id, leaderboardId),
+        ne(tiktok_leaderboards.status, "cancelled")
+      )
+    )
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) {
+    return null;
+  }
+
+  const [prizes, ranking, snapshots] = await Promise.all([
+    db
+      .select({
+        position: tiktok_leaderboard_prizes.position,
+        reward: tiktok_leaderboard_prizes.reward,
+      })
+      .from(tiktok_leaderboard_prizes)
+      .where(eq(tiktok_leaderboard_prizes.leaderboard_id, row.id))
+      .orderBy(asc(tiktok_leaderboard_prizes.position)),
+    getLiveLeaderboardRanking(row.start_at, row.end_at, 500),
+    getLeaderboardRankingSnapshot(row.id),
+  ]);
+
+  const isActiveWindow = row.start_at <= now && row.end_at > now;
+
+  return {
+    ...row,
+    prizes,
+    ranking,
+    snapshots,
+    is_active: row.status === "active" || (row.status === "scheduled" && isActiveWindow),
   };
 }
 

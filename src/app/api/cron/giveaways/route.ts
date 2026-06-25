@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processFinishedGiveaways } from "@/app/utils/giveaways/lottery";
+import { purgePastGiveawaysCache } from "@/app/utils/frontendCache";
 
 /**
  * GET /api/cron/giveaways
@@ -31,6 +32,11 @@ export async function GET(request: NextRequest) {
     const successCount = results.filter((r) => r.success).length;
     const errorCount = results.filter((r) => !r.success).length;
 
+    let cachePurge = null;
+    if (successCount > 0) {
+      cachePurge = await purgePastGiveawaysCache();
+    }
+
     console.log(
       `[CRON] Completado - Exitosos: ${successCount}, Errores: ${errorCount}`
     );
@@ -46,6 +52,7 @@ export async function GET(request: NextRequest) {
           successful: successCount,
           errors: errorCount,
         },
+        cachePurge,
       },
       { status: 200 }
     );

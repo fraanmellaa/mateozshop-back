@@ -5,19 +5,13 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: "https",
-        hostname: "cdn.discordapp.com",
+        hostname: "**",
         port: "",
         pathname: "/**",
       },
       {
-        protocol: "https",
-        hostname: "locowin.net",
-        port: "",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "community.fastly.steamstatic.com",
+        protocol: "http",
+        hostname: "**",
         port: "",
         pathname: "/**",
       },

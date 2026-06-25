@@ -4,6 +4,7 @@ import {
   disqualifyAndReallocateTikTokLeaderboardResult,
   updateTikTokLeaderboardResultReview,
 } from "@/app/utils/tiktok/leaderboards";
+import { purgePastLeaderboardsCache } from "@/app/utils/frontendCache";
 
 export async function PUT(
   request: NextRequest,
@@ -41,6 +42,8 @@ export async function PUT(
         resultId,
         reviewNote: body?.review_note ? String(body.review_note) : undefined,
       });
+
+      await purgePastLeaderboardsCache();
 
       return NextResponse.json({ success: true });
     }

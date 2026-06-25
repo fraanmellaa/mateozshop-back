@@ -7,6 +7,7 @@ import {
   TikTokLeaderboardStatus,
   updateTikTokLeaderboard,
 } from "@/app/utils/tiktok/leaderboards";
+import { purgePastLeaderboardsCache } from "@/app/utils/frontendCache";
 
 export async function GET(
   request: NextRequest,
@@ -81,6 +82,10 @@ export async function PUT(
         status as TikTokLeaderboardStatus,
         body?.review_notes ? String(body.review_notes) : undefined
       );
+
+      if (status === "in_review" || status === "closed" || status === "cancelled") {
+        await purgePastLeaderboardsCache();
+      }
 
       return NextResponse.json({ success: true });
     }
