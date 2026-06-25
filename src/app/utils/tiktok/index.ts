@@ -483,8 +483,21 @@ export async function upsertAssociatedTikTokVideo(params: {
   commentCount?: number;
   shareCount?: number;
   createdAt?: number;
+  leaderboardId?: number;
 }) {
   const now = Math.floor(Date.now() / 1000);
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from("user_tiktok_videos")
+    .select("leaderboard_id")
+    .eq("video_id", params.videoId)
+    .limit(1);
+
+  if (existingError) {
+    throw existingError;
+  }
+
+  const existing = existingRows?.[0];
 
   const payload = {
       user_id: params.userId,
@@ -498,6 +511,10 @@ export async function upsertAssociatedTikTokVideo(params: {
       share_count: params.shareCount || 0,
       associated_at: now,
       created_at: params.createdAt || now,
+      leaderboard_id:
+        typeof params.leaderboardId === "number"
+          ? params.leaderboardId
+          : existing?.leaderboard_id ?? null,
       updated_at: now,
     };
 

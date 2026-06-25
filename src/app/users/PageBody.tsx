@@ -26,8 +26,6 @@ import AddPointsModal from "./AddPointsModal";
 import RemovePointsModal from "./RemovePointsModal";
 import ResetPointsModal from "./ResetPointsModal";
 
-import { sendKickBotMessage } from "@/app/utils/chat";
-
 export default function PageBody({ users }: { users: User[] }) {
   const router = useRouter();
   const [isAddPointsOpen, setIsAddPointsOpen] = useState(false);
@@ -43,17 +41,18 @@ export default function PageBody({ users }: { users: User[] }) {
     if (!selectedUser) return;
 
     try {
-      // Enviar comando para añadir puntos usando kick_username
-      const kickUsername = selectedUser.kick_username || selectedUser.username;
-      const message = `!points add @${kickUsername} ${points}`;
-      await sendKickBotMessage(message);
+      const response = await fetch(`/api/admin/users/${selectedUser.id}/points`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action: "add", amount: points }),
+      });
 
-      console.log(`Added ${points} points to user ${kickUsername}`);
+      if (!response.ok) {
+        throw new Error("ADD_POINTS_FAILED");
+      }
 
-      // Mostrar mensaje de éxito (opcional)
-      // alert(`Puntos añadidos exitosamente a ${kickUsername}`);
-
-      // Refresh la página después de la acción
       router.refresh();
     } catch (error) {
       console.error("Error adding points:", error);
@@ -65,21 +64,30 @@ export default function PageBody({ users }: { users: User[] }) {
     if (!selectedUser) return;
 
     try {
-      // Enviar comando para quitar puntos usando kick_username
-      const kickUsername = selectedUser.kick_username || selectedUser.username;
-      const message = `!points add @${kickUsername} -${points}`;
-      await sendKickBotMessage(message);
+      const response = await fetch(`/api/admin/users/${selectedUser.id}/points`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action: "remove", amount: points }),
+      });
 
-      console.log(`Removed ${points} points from user ${kickUsername}`);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        if (payload?.error === "INSUFFICIENT_AVAILABLE_POINTS") {
+          throw new Error("INSUFFICIENT_AVAILABLE_POINTS");
+        }
+        throw new Error("REMOVE_POINTS_FAILED");
+      }
 
-      // Mostrar mensaje de éxito (opcional)
-      // alert(`Puntos removidos exitosamente de ${kickUsername}`);
-
-      // Refresh la página después de la acción
       router.refresh();
     } catch (error) {
       console.error("Error removing points:", error);
-      alert("Error al quitar puntos");
+      alert(
+        error instanceof Error && error.message === "INSUFFICIENT_AVAILABLE_POINTS"
+          ? "No puedes quitar más puntos de los disponibles"
+          : "Error al quitar puntos"
+      );
     }
   };
 
@@ -87,24 +95,43 @@ export default function PageBody({ users }: { users: User[] }) {
     if (!selectedUser) return;
 
     try {
-      // Enviar comando para resetear puntos usando el total de puntos en negativo
-      const kickUsername = selectedUser.kick_username || selectedUser.username;
-      const totalPoints = selectedUser.total_points;
-      const message = `!points add @${kickUsername} -${totalPoints}`;
-      await sendKickBotMessage(message);
+      const response = await fetch(`/api/admin/users/${selectedUser.id}/points`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action: "reset" }),
+      });
 
-      console.log(
-        `Reset points for user ${kickUsername} (removed ${totalPoints} total points)`
-      );
+      if (!response.ok) {
+        throw new Error("RESET_POINTS_FAILED");
+      }
 
-      // Mostrar mensaje de éxito (opcional)
-      // alert(`Puntos reseteados exitosamente para ${kickUsername}`);
-
-      // Refresh la página después de la acción
       router.refresh();
     } catch (error) {
       console.error("Error resetting points:", error);
       alert("Error al resetear puntos");
+    }
+  };
+
+  const handleToggleBan = async (user: User) => {
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}/ban`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ is_banned: !user.is_banned }),
+      });
+
+      if (!response.ok) {
+        throw new Error("TOGGLE_BAN_FAILED");
+      }
+
+      router.refresh();
+    } catch (error) {
+      console.error("Error toggling user ban:", error);
+      alert("Error al actualizar el estado de baneo");
     }
   };
 
@@ -163,6 +190,25 @@ export default function PageBody({ users }: { users: User[] }) {
       cell: ({ row }) => (
         <div className="lowercase text-left">{row.original.actual_points}</div>
       ),
+    },
+    {
+      accessorKey: "is_banned",
+      header: () => <div className="text-left">Estado</div>,
+      cell: ({ row }) => {
+        const isBanned = Boolean(row.original.is_banned);
+
+        return (
+          <span
+            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+              isBanned
+                ? "bg-red-500/15 text-red-300"
+                : "bg-emerald-500/15 text-emerald-300"
+            }`}
+          >
+            {isBanned ? "Baneado" : "Activo"}
+          </span>
+        );
+      },
     },
     {
       id: "actions",
@@ -231,6 +277,15 @@ export default function PageBody({ users }: { users: User[] }) {
                 <RotateCcw className="mr-2 h-4 w-4" />
                 Resetear Puntos
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => handleToggleBan(user)}
+                className={`flex items-center ${
+                  user.is_banned ? "text-emerald-300" : "text-red-300"
+                }`}
+              >
+                {user.is_banned ? "Desbanear Usuario" : "Banear Usuario"}
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         );
@@ -257,7 +312,7 @@ export default function PageBody({ users }: { users: User[] }) {
           setSelectedUser(null);
         }}
         onConfirm={handleAddPoints}
-        username={selectedUser?.kick_username || selectedUser?.username || ""}
+        username={selectedUser?.username || ""}
       />
 
       <RemovePointsModal
@@ -267,7 +322,7 @@ export default function PageBody({ users }: { users: User[] }) {
           setSelectedUser(null);
         }}
         onConfirm={handleRemovePoints}
-        username={selectedUser?.kick_username || selectedUser?.username || ""}
+        username={selectedUser?.username || ""}
         currentPoints={selectedUser?.actual_points || 0}
       />
 
@@ -278,7 +333,7 @@ export default function PageBody({ users }: { users: User[] }) {
           setSelectedUser(null);
         }}
         onConfirm={handleResetPoints}
-        username={selectedUser?.kick_username || selectedUser?.username || ""}
+        username={selectedUser?.username || ""}
         currentPoints={selectedUser?.actual_points || 0}
       />
     </>

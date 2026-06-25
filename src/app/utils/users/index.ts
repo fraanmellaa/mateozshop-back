@@ -11,17 +11,23 @@ const supabase = createClient(
   }
 );
 
+function mapUserRow(user: Record<string, unknown>) {
+  return {
+    ...user,
+    is_banned: Boolean(user.is_banned),
+    actual_points:
+      Number(user.total_points || 0) - Number(user.used_points || 0),
+    created_at: new Date(Number(user.created_at || 0) * 1000).toISOString(),
+  } as User;
+}
+
 export const getUsers = async () => {
   const { data: usersData, error } = await supabase.from("users").select("*");
   if (error) {
     throw error;
   }
 
-  const usersArray: User[] = usersData.map((user) => ({
-    ...user,
-    actual_points: user.total_points - user.used_points || 0,
-    created_at: new Date(user.created_at * 1000).toISOString(),
-  }));
+  const usersArray: User[] = (usersData || []).map((user) => mapUserRow(user));
 
   return usersArray;
 };
@@ -42,13 +48,27 @@ export const getUserByDiscordId = async (discordId: string) => {
     return null;
   }
 
-  const plainCustomerData: User = {
-    ...userData,
-    actual_points: userData.total_points - userData.used_points,
-    created_at: new Date(userData.created_at * 1000).toISOString(),
-  };
+  return mapUserRow(userData);
+};
 
-  return plainCustomerData;
+export const getUserByKickId = async (kickId: string) => {
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("kick_id", kickId)
+    .limit(1);
+
+  if (error) {
+    throw error;
+  }
+
+  const userData = data.length ? data[0] : null;
+
+  if (!userData) {
+    return null;
+  }
+
+  return mapUserRow(userData);
 };
 
 export const updateTotalPoints = async (kickId: string, points: number) => {
@@ -77,6 +97,96 @@ export const updateUsedPoints = async (kickId: string, points: number) => {
   }
 
   return updatedUser.length ? updatedUser[0] : null;
+};
+
+export const addPointsToUserById = async (userId: number, amount: number) => {
+  const { data: rows, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", userId)
+    .limit(1);
+
+  if (error) throw error;
+
+  const user = rows?.[0];
+  if (!user) return null;
+
+  const nextTotalPoints = Number(user.total_points || 0) + amount;
+
+  const { data: updatedRows, error: updateError } = await supabase
+    .from("users")
+    .update({ total_points: nextTotalPoints })
+    .eq("id", userId)
+    .select("*")
+    .limit(1);
+
+  if (updateError) throw updateError;
+
+  return updatedRows?.[0] ? mapUserRow(updatedRows[0]) : null;
+};
+
+export const removeAvailablePointsFromUserById = async (
+  userId: number,
+  amount: number
+) => {
+  const { data: rows, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", userId)
+    .limit(1);
+
+  if (error) throw error;
+
+  const user = rows?.[0];
+  if (!user) return null;
+
+  const totalPoints = Number(user.total_points || 0);
+  const usedPoints = Number(user.used_points || 0);
+  const availablePoints = totalPoints - usedPoints;
+
+  if (amount > availablePoints) {
+    throw new Error("INSUFFICIENT_AVAILABLE_POINTS");
+  }
+
+  const { data: updatedRows, error: updateError } = await supabase
+    .from("users")
+    .update({ total_points: totalPoints - amount })
+    .eq("id", userId)
+    .select("*")
+    .limit(1);
+
+  if (updateError) throw updateError;
+
+  return updatedRows?.[0] ? mapUserRow(updatedRows[0]) : null;
+};
+
+export const resetUserPointsById = async (userId: number) => {
+  const { data: updatedRows, error } = await supabase
+    .from("users")
+    .update({ total_points: 0, used_points: 0 })
+    .eq("id", userId)
+    .select("*")
+    .limit(1);
+
+  if (error) throw error;
+
+  return updatedRows?.[0] ? mapUserRow(updatedRows[0]) : null;
+};
+
+export const setUserBannedStatusById = async (
+  userId: number,
+  isBanned: boolean
+) => {
+  const { data: updatedRows, error } = await supabase
+    .from("users")
+    .update({ is_banned: isBanned })
+    .eq("id", userId)
+    .select("*")
+    .limit(1);
+
+  if (error) throw error;
+
+  return updatedRows?.[0] ? mapUserRow(updatedRows[0]) : null;
 };
 
 export const createUser = async (user: {
@@ -132,18 +242,18 @@ export const createUser = async (user: {
   };
 };
 
-export const updateUserKickId = async (
-  verification_code: number,
+export const linkKickAccount = async (
+  userId: number,
   kickId: string,
-  kick_username: string
+  kickUsername: string
 ) => {
   const { data: updatedUser, error } = await supabase
     .from("users")
     .update({
       kick_id: kickId,
-      kick_username,
+      kick_username: kickUsername,
     })
-    .eq("verification_code", verification_code)
+    .eq("id", userId)
     .select("*");
 
   if (error) {
@@ -169,11 +279,5 @@ export const getUserById = async (userId: number) => {
     return null;
   }
 
-  const plainUserData: User = {
-    ...userData,
-    actual_points: userData.total_points - userData.used_points,
-    created_at: new Date(userData.created_at * 1000).toISOString(),
-  };
-
-  return plainUserData;
+  return mapUserRow(userData);
 };

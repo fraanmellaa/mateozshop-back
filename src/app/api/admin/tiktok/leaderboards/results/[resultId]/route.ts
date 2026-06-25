@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   disqualifyAndReallocateTikTokLeaderboardResult,
+  getTikTokLeaderboardResultById,
   updateTikTokLeaderboardResultReview,
 } from "@/app/utils/tiktok/leaderboards";
+import { sendWinnerNotificationEmail } from "@/app/utils/email";
+import { publishUserNotification } from "@/app/utils/realtime";
 import { purgePastLeaderboardsCache } from "@/app/utils/frontendCache";
 
 export async function PUT(
@@ -48,6 +51,15 @@ export async function PUT(
       return NextResponse.json({ success: true });
     }
 
+    const current = await getTikTokLeaderboardResultById(resultId);
+
+    if (!current) {
+      return NextResponse.json(
+        { success: false, error: "RESULT_NOT_FOUND" },
+        { status: 404 }
+      );
+    }
+
     const updated = await updateTikTokLeaderboardResultReview({
       resultId,
       status,
@@ -60,6 +72,41 @@ export async function PUT(
         { status: 404 }
       );
     }
+
+    if (status === "approved" && current.status !== "approved") {
+      const leaderboardTitle = current.leaderboard?.title || "tu leaderboard de TikTok";
+      const targetUrl = `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://mateozshop.com"}/tiktok/leaderboards/${current.leaderboard_id}`;
+
+      if (current.user?.discord_id) {
+        await publishUserNotification({
+          discordId: current.user.discord_id,
+          type: "leaderboard_won",
+          title: "Has ganado una leaderboard",
+          body: `Tu video ha quedado en el puesto #${current.position} de ${leaderboardTitle}.`,
+          leaderboardId: current.leaderboard_id,
+          leaderboardTitle,
+          targetUrl,
+        });
+      }
+
+      if (current.user?.email) {
+        await sendWinnerNotificationEmail({
+          to: current.user.email,
+          subject: `Has ganado la leaderboard ${leaderboardTitle}`,
+          title: "Has ganado una leaderboard",
+          intro: `Tu video ha quedado premiado en ${leaderboardTitle}.`,
+          details: [
+            `Leaderboard: ${leaderboardTitle}`,
+            `Puesto: #${current.position}`,
+            `Premio: ${current.reward}`,
+          ],
+          ctaLabel: "Ver leaderboard",
+          ctaUrl: targetUrl,
+        });
+      }
+    }
+
+    await purgePastLeaderboardsCache();
 
     return NextResponse.json({ success: true, result: updated });
   } catch (error) {

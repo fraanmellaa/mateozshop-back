@@ -54,6 +54,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "USER_NOT_FOUND" }, { status: 404 });
   }
 
+  if (user.is_banned) {
+    return NextResponse.json({ error: "USER_BANNED" }, { status: 403 });
+  }
+
   const { data: updated, error: updateError } = await supabase
     .from("users")
     .update({ total_points: user.total_points + body.amount })

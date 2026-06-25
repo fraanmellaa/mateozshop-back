@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 
+import { sendWinnerNotificationEmail } from "@/app/utils/email";
 import { publishBidUpdated, publishUserNotification } from "@/app/utils/realtime";
 
 const supabase = createClient(
@@ -75,12 +76,13 @@ export async function processAuctionsTick() {
     let winnerName: string | null = null;
     let winnerImage: string | null = null;
     let winnerDiscordId: string | null = null;
+    let winnerEmail: string | null = null;
     let stockAfter = auction.stock;
 
     if (topBid) {
       const { data: bidderRows } = await supabase
         .from("users")
-        .select("id, username, image, discord_id, total_points, used_points")
+        .select("id, username, image, discord_id, email, total_points, used_points")
         .eq("id", topBid.user_id)
         .limit(1);
 
@@ -108,6 +110,7 @@ export async function processAuctionsTick() {
           winnerName = bidder.username;
           winnerImage = bidder.image;
           winnerDiscordId = bidder.discord_id;
+          winnerEmail = bidder.email;
         }
       }
     }
@@ -210,6 +213,21 @@ export async function processAuctionsTick() {
         productImage: auction.image,
         amount: winningBid,
         targetUrl: "/mi-cuenta/pedidos",
+      });
+    }
+
+    if (winnerEmail) {
+      await sendWinnerNotificationEmail({
+        to: winnerEmail,
+        subject: `Has ganado la puja de ${auction.name}`,
+        title: "Has ganado una puja",
+        intro: `Enhorabuena, has ganado ${auction.name} en Mateoz Shop.`,
+        details: [
+          `Producto: ${auction.name}`,
+          `Puja ganadora: ${winningBid} puntos`,
+        ],
+        ctaLabel: "Ver mis pedidos",
+        ctaUrl: `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://mateozshop.com"}/mi-cuenta/pedidos`,
       });
     }
 

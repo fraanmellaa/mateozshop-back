@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { sendWinnerNotificationEmail } from "@/app/utils/email";
 import { publishUserNotification } from "@/app/utils/realtime";
 
 const supabase = createClient(
@@ -36,7 +37,7 @@ export const performGiveawayLottery = async (giveawayId: number) => {
 
     const { data: entries, error: entriesError } = await supabase
       .from("giveaways_entries")
-      .select("user_id, user:users!giveaways_entries_user_id_fkey(discord_id, username, image, kick_id)")
+      .select("user_id, user:users!giveaways_entries_user_id_fkey(discord_id, email, username, image, kick_id)")
       .eq("giveaway_id", giveawayId);
 
     if (entriesError) throw entriesError;
@@ -64,6 +65,7 @@ export const performGiveawayLottery = async (giveawayId: number) => {
       return {
         userId: entry.user_id,
         discordId: user?.discord_id as string | null,
+        email: user?.email as string | null,
         username: user?.username as string | null,
         image: user?.image as string | null,
         kickId: user?.kick_id as string | null,
@@ -98,6 +100,18 @@ export const performGiveawayLottery = async (giveawayId: number) => {
           giveawayImage: giveaway.image,
           targetUrl: `/sorteos/${giveawayId}`,
         });
+
+        if (participant.email) {
+          await sendWinnerNotificationEmail({
+            to: participant.email,
+            subject: `Has ganado el sorteo ${giveaway.title}`,
+            title: "Has ganado un sorteo",
+            intro: `Enhorabuena, has sido seleccionado como ganador de \"${giveaway.title}\".`,
+            details: [`Sorteo: ${giveaway.title}`],
+            ctaLabel: "Ver sorteo",
+            ctaUrl: `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://mateozshop.com"}/sorteos/${giveawayId}`,
+          });
+        }
         continue;
       }
 

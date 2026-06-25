@@ -227,17 +227,66 @@ export async function getLeaderboardRankingSnapshot(leaderboardId: number) {
   });
 }
 
-export async function getLiveLeaderboardRanking(startAt: number, endAt: number, limit = 50) {
+export async function getTikTokLeaderboardResultById(resultId: number) {
   const { data, error } = await supabase
+    .from("tiktok_leaderboard_results")
+    .select(
+      "*, leaderboard:tiktok_leaderboards!tiktok_leaderboard_results_leaderboard_id_fkey(id, title), user:users!tiktok_leaderboard_results_user_id_fkey(discord_id, email, username, image)"
+    )
+    .eq("id", resultId)
+    .limit(1);
+
+  if (error) throw error;
+
+  const row = data?.[0];
+  if (!row) return null;
+
+  const leaderboard = Array.isArray(row.leaderboard) ? row.leaderboard[0] : row.leaderboard;
+  const user = Array.isArray(row.user) ? row.user[0] : row.user;
+
+  return {
+    ...row,
+    leaderboard: leaderboard || null,
+    user: user || null,
+  };
+}
+
+export async function getTikTokLeaderboardForVideoAssociation(leaderboardId: number) {
+  const { data, error } = await supabase
+    .from("tiktok_leaderboards")
+    .select("id, title, start_at, end_at, status")
+    .eq("id", leaderboardId)
+    .limit(1);
+
+  if (error) throw error;
+
+  return data?.[0] ?? null;
+}
+
+export async function getLiveLeaderboardRanking(
+  startAt: number,
+  endAt: number,
+  limit = 50,
+  leaderboardId?: number
+) {
+  let query = supabase
     .from("user_tiktok_videos")
     .select("*, user:users!user_tiktok_videos_user_id_fkey(username, image)")
     .eq("is_banned", false)
-    .gte("associated_at", startAt)
-    .lte("associated_at", endAt)
     .order("view_count", { ascending: false })
     .order("associated_at", { ascending: true })
     .order("id", { ascending: true })
     .limit(limit);
+
+  if (typeof leaderboardId === "number") {
+    query = query.or(
+      `leaderboard_id.eq.${leaderboardId},and(leaderboard_id.is.null,associated_at.gte.${startAt},associated_at.lte.${endAt})`
+    );
+  } else {
+    query = query.gte("associated_at", startAt).lte("associated_at", endAt);
+  }
+
+  const { data, error } = await query;
 
   if (error) throw error;
 
@@ -275,7 +324,12 @@ export async function getActiveLeaderboardVideoCandidates() {
 
   const candidates = await Promise.all(
     (activeBoards || []).map(async (board) => {
-      const ranking = await getLiveLeaderboardRanking(board.start_at, board.end_at, 500);
+      const ranking = await getLiveLeaderboardRanking(
+        board.start_at,
+        board.end_at,
+        500,
+        board.id
+      );
       return ranking.map((row) => ({
         leaderboard_id: board.id,
         video_row_id: row.video_row_id,
@@ -360,7 +414,7 @@ export async function getPublicTikTokLeaderboards() {
       const ranking =
         row.status === "in_review" || row.status === "closed"
           ? await getLeaderboardRankingSnapshot(row.id)
-          : await getLiveLeaderboardRanking(row.start_at, row.end_at, 25);
+          : await getLiveLeaderboardRanking(row.start_at, row.end_at, 25, row.id);
 
       const isActiveWindow = row.start_at <= now && row.end_at > now;
 
@@ -401,7 +455,7 @@ export async function getPublicTikTokLeaderboardById(leaderboardId: number) {
       .eq("leaderboard_id", row.id)
       .order("position", { ascending: true })
       .then((r) => r.data || []),
-    getLiveLeaderboardRanking(row.start_at, row.end_at, 500),
+    getLiveLeaderboardRanking(row.start_at, row.end_at, 500, row.id),
     getLeaderboardRankingSnapshot(row.id),
   ]);
 
@@ -515,7 +569,9 @@ export async function processTikTokLeaderboardsTick() {
       .order("position", { ascending: true });
 
     const maxPosition = (prizes || []).reduce((max, prize) => Math.max(max, prize.position), 0);
-    const ranking = maxPosition > 0 ? await getLiveLeaderboardRanking(board.start_at, board.end_at, maxPosition) : [];
+    const ranking = maxPosition > 0
+      ? await getLiveLeaderboardRanking(board.start_at, board.end_at, maxPosition, board.id)
+      : [];
 
     await supabase.from("tiktok_leaderboard_results").delete().eq("leaderboard_id", board.id);
 

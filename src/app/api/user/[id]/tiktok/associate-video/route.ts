@@ -7,6 +7,7 @@ import {
   getUserTikTokConnection,
   upsertAssociatedTikTokVideo,
 } from "@/app/utils/tiktok";
+import { getTikTokLeaderboardForVideoAssociation } from "@/app/utils/tiktok/leaderboards";
 
 type ParsedTikTokVideoUrl = {
   videoId: string;
@@ -55,6 +56,10 @@ export async function POST(
 
   const body = await request.json().catch(() => null);
   const videoUrl = typeof body?.video_url === "string" ? body.video_url.trim() : "";
+  const leaderboardId =
+    typeof body?.leaderboard_id === "number" && Number.isInteger(body.leaderboard_id)
+      ? body.leaderboard_id
+      : null;
 
   if (!videoUrl) {
     return NextResponse.json(
@@ -137,6 +142,47 @@ export async function POST(
     );
   }
 
+  let leaderboard = null;
+  const now = Math.floor(Date.now() / 1000);
+
+  if (leaderboardId !== null) {
+    leaderboard = await getTikTokLeaderboardForVideoAssociation(leaderboardId);
+
+    if (!leaderboard) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "LEADERBOARD_NOT_FOUND",
+          message: "No se ha encontrado la leaderboard indicada.",
+        },
+        { status: 404 }
+      );
+    }
+
+    const isActiveWindow = leaderboard.start_at <= now && leaderboard.end_at > now;
+    const allowsAssociation =
+      leaderboard.status === "active" ||
+      (leaderboard.status === "scheduled" && isActiveWindow);
+
+    if (!allowsAssociation) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "LEADERBOARD_NOT_ACTIVE",
+          message: "Solo puedes vincular videos desde una leaderboard activa.",
+        },
+        { status: 400 }
+      );
+    }
+  }
+
+  const videoCreatedAt = publicVideo.create_time || now;
+  const leaderboardLinked = Boolean(
+    leaderboard &&
+      videoCreatedAt >= leaderboard.start_at &&
+      videoCreatedAt <= leaderboard.end_at
+  );
+
   const savedVideo = await upsertAssociatedTikTokVideo({
     userId: user.id,
     videoId: parsedVideo.videoId,
@@ -147,13 +193,16 @@ export async function POST(
     viewCount: publicVideo.view_count,
     commentCount: publicVideo.comment_count,
     shareCount: publicVideo.share_count,
-    createdAt: publicVideo.create_time || Math.floor(Date.now() / 1000),
+    createdAt: videoCreatedAt,
+    leaderboardId: leaderboardLinked && leaderboard ? leaderboard.id : undefined,
   });
 
   return NextResponse.json({
     success: true,
     data: {
       associated: true,
+      leaderboard_linked: leaderboardLinked,
+      leaderboard_id: leaderboardLinked && leaderboard ? leaderboard.id : null,
       video: savedVideo,
     },
   });

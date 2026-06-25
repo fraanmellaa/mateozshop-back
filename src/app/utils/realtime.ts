@@ -65,7 +65,8 @@ export async function publishUserNotification(payload: {
     | "auction_finished"
     | "auction_starting"
     | "giveaway_finished"
-    | "giveaway_won";
+    | "giveaway_won"
+    | "leaderboard_won";
   title: string;
   body: string;
   productId?: number;
@@ -74,6 +75,8 @@ export async function publishUserNotification(payload: {
   giveawayId?: number;
   giveawayTitle?: string;
   giveawayImage?: string;
+  leaderboardId?: number;
+  leaderboardTitle?: string;
   amount?: number;
   initialPrice?: number;
   targetUrl: string;

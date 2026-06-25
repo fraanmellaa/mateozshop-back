@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
-import { sendEmail } from "@/app/utils/email";
+import { sendCustomEmail } from "@/app/utils/email";
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -244,7 +244,7 @@ Nuestro equipo se pondrá en contacto contigo pronto para coordinar la entrega d
   const message = customMessage || defaultMessage;
   const subject = customSubject || `¡Felicidades! Has ganado: ${giveaway.title}`;
 
-  await sendEmail(winner.email, subject, message);
+  await sendCustomEmail(winner.email, subject, message);
 
   return { success: true };
 };

@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
         name: user.username,
         avatar: user.image,
         points: user.actual_points,
-        isBanned: false,
+        isBanned: Boolean(user.is_banned),
       },
       discord: {
         id: user.discord_id,
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       },
       kick: {
         name: user.kick_username,
-        isBanned: false,
+        isBanned: Boolean(user.is_banned),
       },
     },
     { status: 200 }

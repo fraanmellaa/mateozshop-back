@@ -1,36 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { getUserIdByUsername } from "../../utils";
-import { updateTotalPoints, updateUserKickId } from "@/app/utils/users";
+import { updateTotalPoints } from "@/app/utils/users";
 import { sendKickBotMessage } from "@/app/utils/chat";
 
 export async function POST(request: Request) {
   const body = await request.json();
 
   const message = body.content;
-
-  const verifyMatch = message.match(/!verificar(?:\s+([A-Za-z0-9_-]+))?/i);
-  if (verifyMatch) {
-    // quedarse con el codigo, reemplazar !verificar por cadena vacia y trim
-    const code = verifyMatch[1] ? verifyMatch[1].trim() : null;
-
-    const userKickId = await getUserIdByUsername(body.sender?.username || "");
-
-    await updateUserKickId(
-      code ? parseInt(code, 10) : 0,
-      userKickId,
-      body.sender?.username
-    );
-
-    await sendKickBotMessage(
-      `@${body.sender?.username} ¡Tu cuenta ha sido verificada con éxito!`
-    );
-
-    return NextResponse.json(
-      { message: "Comando verificar recibido", code },
-      { status: 200 }
-    );
-  }
 
   const pointsMatch = message.match(/tiene (\d+) puntos/);
   if (pointsMatch) {
@@ -66,7 +43,7 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json(
-    { message: "No recognized command in the message" },
+    { message: "No recognized points update in the message" },
     { status: 200 }
   );
 }

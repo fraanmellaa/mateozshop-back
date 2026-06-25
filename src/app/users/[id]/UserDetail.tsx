@@ -20,6 +20,7 @@ interface UserDetailProps {
 export default function UserDetail({ user }: UserDetailProps) {
   const router = useRouter();
   const userDate = new Date(user.created_at);
+  const isBanned = Boolean(user.is_banned);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -166,9 +167,7 @@ export default function UserDetail({ user }: UserDetailProps) {
           </Button>
           <Button
             variant="outline"
-            onClick={() =>
-              router.push(`/api/user/${user.discord_id}/giveaways`)
-            }
+            onClick={() => router.push(`/giveaways`)}
             className="flex items-center gap-2"
           >
             <Trophy className="h-4 w-4" />
@@ -201,8 +200,14 @@ export default function UserDetail({ user }: UserDetailProps) {
             <label className="text-sm font-medium text-muted-foreground">
               Estado de la Cuenta
             </label>
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-500/20 text-green-300">
-              Activa
+            <span
+              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                isBanned
+                  ? "bg-red-500/20 text-red-300"
+                  : "bg-green-500/20 text-green-300"
+              }`}
+            >
+              {isBanned ? "Baneada" : "Activa"}
             </span>
           </div>
         </div>
