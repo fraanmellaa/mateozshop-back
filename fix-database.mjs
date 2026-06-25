@@ -1,57 +1,48 @@
-import { drizzle } from "drizzle-orm/neon-serverless";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { sql } from "drizzle-orm";
+import pg from "pg";
 
-function withMateozSearchPath(databaseUrl) {
-  const parsed = new URL(databaseUrl);
-  const currentOptions = parsed.searchParams.get("options") ?? "";
-  if (!currentOptions.includes("search_path=mateoz,public")) {
-    const nextOptions = currentOptions
-      ? `${currentOptions} -c search_path=mateoz,public`
-      : "-c search_path=mateoz,public";
-    parsed.searchParams.set("options", nextOptions);
-  }
-  return parsed.toString();
-}
+const { Pool } = pg;
 
 function resolveDatabaseUrl() {
+  const supabaseDbUrl = process.env.SUPABASE_DB_URL;
   const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (supabaseUrl && serviceRoleKey) {
+  if (supabaseDbUrl) {
+    return supabaseDbUrl;
+  }
+
+  if (supabaseUrl) {
     if (
       supabaseUrl.startsWith("postgres://") ||
       supabaseUrl.startsWith("postgresql://")
     ) {
-      return withMateozSearchPath(supabaseUrl);
-    }
-
-    const parsed = new URL(supabaseUrl);
-    const protocol = parsed.protocol.replace(":", "");
-
-    if (protocol === "http" || protocol === "https") {
-      const host = parsed.host;
-      return withMateozSearchPath(
-        `postgresql://postgres:${encodeURIComponent(serviceRoleKey)}@${host}/postgres?sslmode=require`
-      );
+      return supabaseUrl;
     }
   }
 
   if (process.env.DATABASE_URL) {
-    return withMateozSearchPath(process.env.DATABASE_URL);
+    return process.env.DATABASE_URL;
   }
 
   throw new Error(
-    "Missing DB configuration. Set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY or DATABASE_URL"
+    "Missing DB configuration. Set SUPABASE_DB_URL (postgresql://...), or SUPABASE_URL as postgresql://..., or DATABASE_URL"
   );
 }
 
 // Usar la misma configuración que tu aplicación
-const db = drizzle(resolveDatabaseUrl());
+const pool = new Pool({
+  connectionString: resolveDatabaseUrl(),
+});
+
+const db = drizzle(pool);
 
 async function main() {
   console.log("🔧 Iniciando migración manual de la base de datos...");
 
   try {
+    await db.execute(sql`SET search_path TO mateoz, public;`);
+
     // 1. Verificar si las columnas ya existen
     console.log("📋 Verificando estructura actual de la tabla giveaways...");
 

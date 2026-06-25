@@ -290,8 +290,11 @@ export async function processAuctionsTick() {
           and pb.auction_round = ${row.auction_round}
       `);
 
-      const participantDiscordIds = participantRows.rows
-        .map((entry) => (entry as { discord_id: string | null }).discord_id)
+      const participantDiscordRows = participantRows.rows as Array<{
+        discord_id: string | null;
+      }>;
+      const participantDiscordIds = participantDiscordRows
+        .map((entry) => entry.discord_id)
         .filter((discordId): discordId is string => Boolean(discordId));
 
       return {
@@ -353,7 +356,7 @@ export async function processAuctionsTick() {
       }
 
       const losingParticipants = result.participantDiscordIds.filter(
-        (discordId) => discordId !== result.winnerDiscordId
+        (discordId: string) => discordId !== result.winnerDiscordId
       );
 
       for (const discordId of losingParticipants) {
@@ -448,8 +451,11 @@ export async function processAuctionsTick() {
           `)
         : { rows: [] as Array<{ discord_id: string | null }> };
 
-      const participantDiscordIds = participantRows.rows
-        .map((entry) => (entry as { discord_id: string | null }).discord_id)
+      const participantDiscordRows = participantRows.rows as Array<{
+        discord_id: string | null;
+      }>;
+      const participantDiscordIds = participantDiscordRows
+        .map((entry) => entry.discord_id)
         .filter((discordId): discordId is string => Boolean(discordId));
 
       await tx
