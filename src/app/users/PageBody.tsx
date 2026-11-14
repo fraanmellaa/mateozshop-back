@@ -74,8 +74,8 @@ export default function PageBody({ users }: { users: User[] }) {
 
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
-        if (payload?.error === "INSUFFICIENT_AVAILABLE_POINTS") {
-          throw new Error("INSUFFICIENT_AVAILABLE_POINTS");
+        if (payload?.error === "INSUFFICIENT_POINTS") {
+          throw new Error("INSUFFICIENT_POINTS");
         }
         throw new Error("REMOVE_POINTS_FAILED");
       }
@@ -84,7 +84,7 @@ export default function PageBody({ users }: { users: User[] }) {
     } catch (error) {
       console.error("Error removing points:", error);
       alert(
-        error instanceof Error && error.message === "INSUFFICIENT_AVAILABLE_POINTS"
+        error instanceof Error && error.message === "INSUFFICIENT_POINTS"
           ? "No puedes quitar más puntos de los disponibles"
           : "Error al quitar puntos"
       );
@@ -115,6 +115,11 @@ export default function PageBody({ users }: { users: User[] }) {
   };
 
   const handleToggleBan = async (user: User) => {
+    const question = user.is_banned
+      ? `¿Desbanear a ${user.username}?`
+      : `¿Banear a ${user.username}? No podrá canjear, pujar ni ganar puntos.`;
+    if (!window.confirm(question)) return;
+
     try {
       const response = await fetch(`/api/admin/users/${user.id}/ban`, {
         method: "PUT",
@@ -174,7 +179,7 @@ export default function PageBody({ users }: { users: User[] }) {
       ),
     },
     {
-      accessorKey: "puntos",
+      accessorKey: "actual_points",
       header: ({ column }) => {
         return (
           <Button

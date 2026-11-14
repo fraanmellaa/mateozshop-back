@@ -17,6 +17,7 @@ interface GiveawayDetailClientProps {
     title: string;
     comments: Comment[];
     winners: Array<{ id: number; name: string; profileImage: string }>;
+    winnerEmail: string;
   };
   status: string;
 }
@@ -72,7 +73,7 @@ export default function GiveawayDetailClient({
 
     try {
       const response = await fetch(
-        `/api/giveaways/${giveaway.id}/send-winner-email`,
+        `/api/admin/giveaways/${giveaway.id}/send-winner-email`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -118,7 +119,7 @@ export default function GiveawayDetailClient({
         isOpen={showEmailModal}
         onClose={() => setShowEmailModal(false)}
         onSend={handleSendEmail}
-        winnerEmail=""
+        winnerEmail={giveaway.winnerEmail}
         winnerName={giveaway.winners[0]?.name || ""}
         giveawayTitle={giveaway.title}
       />

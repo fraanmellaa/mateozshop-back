@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { fromDateTimeLocal } from "@/app/utils/datetime";
 
 export default function CreateProductModal({
   isOpen,
@@ -63,7 +64,7 @@ export default function CreateProductModal({
           min_bid_increment: formData.min_bid_increment,
           auction_cooldown_seconds: formData.auction_cooldown_seconds,
           auction_ends_at: formData.auction_ends_at
-            ? Math.floor(new Date(formData.auction_ends_at).getTime() / 1000)
+            ? fromDateTimeLocal(formData.auction_ends_at)
             : null,
           sendable: formData.sendable,
           codes,

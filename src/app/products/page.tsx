@@ -1,8 +1,8 @@
 import PageBody from "./PageBody";
-import { getProducts } from "@/app/utils/products";
+import { getAdminProducts } from "@/app/utils/products";
 
 export default async function ProductsPage() {
-  const products = await getProducts();
+  const products = await getAdminProducts();
 
   return (
     <div className="p-4">

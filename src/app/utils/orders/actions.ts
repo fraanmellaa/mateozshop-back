@@ -1,25 +1,120 @@
 "use server";
 
-import { createClient } from "@supabase/supabase-js";
-import { sendCustomEmail } from "../email";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/app/utils/auth";
+import { refundPoints } from "@/app/utils/points";
+import { sendCustomEmail, sendEmail } from "../email";
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    db: { schema: "mateoz" },
+const UNAUTHORIZED = { success: false as const, error: "Sesión de administrador no válida" };
+
+const ORDER_STATUSES = [0, 1, 2];
+const CANCELLED = 2;
+
+/** Devuelve una unidad al stock sin pisar cambios concurrentes. */
+async function restockProduct(productId: number) {
+  const supabase = getSupabaseAdmin();
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { data: rows, error } = await supabase
+      .from("products")
+      .select("stock, is_auction, sendable")
+      .eq("id", productId)
+      .limit(1);
+    if (error) throw error;
+
+    const product = rows?.[0];
+    // Las subastas llevan su stock en la fila de la ronda siguiente, y un
+    // producto con códigos ya gastó uno: en ambos casos no hay unidad que devolver.
+    if (!product || product.is_auction || product.sendable) return;
+
+    const { data: updated, error: updateError } = await supabase
+      .from("products")
+      .update({ stock: product.stock + 1 })
+      .eq("id", productId)
+      .eq("stock", product.stock)
+      .select("id");
+    if (updateError) throw updateError;
+    if (updated?.length) return;
   }
-);
+
+  throw new Error("RESTOCK_CONFLICT");
+}
 
 export async function updateOrderStatus(orderId: number, status: number) {
+  if (!(await requireAdmin())) return UNAUTHORIZED;
+
+  if (!Number.isInteger(orderId) || !ORDER_STATUSES.includes(status)) {
+    return { success: false, error: "Estado de pedido no válido" };
+  }
+
   try {
-    const { error } = await supabase
+    const supabase = getSupabaseAdmin();
+
+    const { data: rows, error: readError } = await supabase
+      .from("orders")
+      .select("id, status, user_id, product_id, total, delivered_code")
+      .eq("id", orderId)
+      .limit(1);
+    if (readError) throw readError;
+
+    const order = rows?.[0];
+    if (!order) {
+      return { success: false, error: "Pedido no encontrado" };
+    }
+
+    if (order.status === CANCELLED) {
+      // Los puntos ya se devolvieron: reabrirlo regalaría el producto.
+      return status === CANCELLED
+        ? { success: true }
+        : { success: false, error: "Un pedido cancelado no se puede reabrir" };
+    }
+
+    if (status === CANCELLED) {
+      // La devolución va primero y lleva clave de idempotencia: si algo falla
+      // después, repetir la cancelación no devuelve los puntos dos veces.
+      if (order.total > 0) {
+        await refundPoints(order.user_id, order.total, {
+          kind: "order_refund",
+          refType: "order",
+          refId: order.id,
+          idempotencyKey: `order:${order.id}:refund`,
+        });
+      }
+
+      const { data: cancelled, error: cancelError } = await supabase
+        .from("orders")
+        .update({ status: CANCELLED })
+        .eq("id", orderId)
+        .neq("status", CANCELLED)
+        .select("id");
+      if (cancelError) throw cancelError;
+
+      // Solo quien hace la transición repone stock, y solo si no se entregó código.
+      if (cancelled?.length && !order.delivered_code) {
+        try {
+          await restockProduct(order.product_id);
+        } catch (error) {
+          console.error(`Order ${orderId}: cancelled but stock not restored`, error);
+          return {
+            success: true,
+            warning: "Pedido cancelado y puntos devueltos, pero no se pudo reponer el stock",
+          };
+        }
+      }
+
+      return { success: true };
+    }
+
+    const { data: updated, error } = await supabase
       .from("orders")
       .update({ status })
-      .eq("id", orderId);
+      .eq("id", orderId)
+      .neq("status", CANCELLED)
+      .select("id");
+    if (error) throw error;
 
-    if (error) {
-      throw error;
+    if (!updated?.length) {
+      return { success: false, error: "Un pedido cancelado no se puede reabrir" };
     }
 
     return { success: true };
@@ -32,13 +127,44 @@ export async function updateOrderStatus(orderId: number, status: number) {
   }
 }
 
-export async function sendOrderEmail(
-  userEmail: string,
-  subject: string,
-  message: string
-) {
+async function getOrderRecipient(orderId: number) {
+  const { data: rows, error } = await getSupabaseAdmin()
+    .from("orders")
+    .select("id, delivered_code, user:users!orders_user_id_fkey(email)")
+    .eq("id", orderId)
+    .limit(1);
+  if (error) throw error;
+
+  const order = rows?.[0];
+  if (!order) return null;
+
+  const user = Array.isArray(order.user) ? order.user[0] : order.user;
+  return {
+    email: (user?.email as string | undefined) || null,
+    deliveredCode: (order.delivered_code as string | null) ?? null,
+  };
+}
+
+/** Email libre al usuario del pedido. El destinatario lo resuelve el servidor. */
+export async function sendOrderEmail(orderId: number, subject: string, message: string) {
+  if (!(await requireAdmin())) return UNAUTHORIZED;
+
+  if (
+    !Number.isInteger(orderId) ||
+    typeof subject !== "string" ||
+    typeof message !== "string" ||
+    !subject.trim() ||
+    !message.trim()
+  ) {
+    return { success: false, error: "Asunto y mensaje son obligatorios" };
+  }
+
   try {
-    const success = await sendCustomEmail(userEmail, subject, message);
+    const recipient = await getOrderRecipient(orderId);
+    if (!recipient) return { success: false, error: "Pedido no encontrado" };
+    if (!recipient.email) return { success: false, error: "El usuario no tiene email" };
+
+    const success = await sendCustomEmail(recipient.email, subject, message);
 
     if (!success) {
       return { success: false, error: "Error al enviar el email" };
@@ -47,6 +173,35 @@ export async function sendOrderEmail(
     return { success: true };
   } catch (error) {
     console.error("Error sending order email:", error);
+    return { success: false, error: "Error al enviar el email" };
+  }
+}
+
+/** Reenvía al usuario el código entregado con el pedido. */
+export async function resendOrderCode(orderId: number) {
+  if (!(await requireAdmin())) return UNAUTHORIZED;
+
+  if (!Number.isInteger(orderId)) {
+    return { success: false, error: "Pedido no válido" };
+  }
+
+  try {
+    const recipient = await getOrderRecipient(orderId);
+    if (!recipient) return { success: false, error: "Pedido no encontrado" };
+    if (!recipient.deliveredCode) return { success: false, error: "Este pedido no lleva código" };
+    if (!recipient.email) return { success: false, error: "El usuario no tiene email" };
+
+    const sent = await sendEmail(recipient.email, "PRODUCT_WITH_REWARD", recipient.deliveredCode);
+
+    const { error } = await getSupabaseAdmin()
+      .from("orders")
+      .update({ code_email_sent: sent })
+      .eq("id", orderId);
+    if (error) console.error(`Order ${orderId}: could not store email result`, error);
+
+    return sent ? { success: true } : { success: false, error: "Error al enviar el email" };
+  } catch (error) {
+    console.error("Error resending order code:", error);
     return { success: false, error: "Error al enviar el email" };
   }
 }

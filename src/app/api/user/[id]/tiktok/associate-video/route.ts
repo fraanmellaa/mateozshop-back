@@ -1,209 +1,161 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { validateBearerToken } from "@/app/utils/bearerAuth";
 import { getUserByDiscordId } from "@/app/utils/users";
 import {
-  fetchTikTokPublicVideoDetail,
+  findOwnedTikTokVideo,
   getUserTikTokConnection,
-  upsertAssociatedTikTokVideo,
+  resolveTikTokVideoId,
+  saveAssociatedTikTokVideo,
+  TikTokApiError,
+  TikTokRelinkRequiredError,
+  TikTokRuleError,
 } from "@/app/utils/tiktok";
 import { getTikTokLeaderboardForVideoAssociation } from "@/app/utils/tiktok/leaderboards";
 
-type ParsedTikTokVideoUrl = {
-  videoId: string;
-  username: string;
-};
-
-function parseTikTokVideoUrl(rawUrl: string): ParsedTikTokVideoUrl | null {
-  try {
-    const parsed = new URL(rawUrl);
-
-    if (!parsed.hostname.includes("tiktok.com")) {
-      return null;
-    }
-
-    const match = parsed.pathname.match(/^\/@([^/]+)\/video\/(\d+)\/?$/i);
-    if (!match) {
-      return null;
-    }
-
-    return {
-      username: match[1],
-      videoId: match[2],
-    };
-  } catch {
-    return null;
-  }
+function fail(status: number, error: string, message: string) {
+  return NextResponse.json({ success: false, error, message }, { status });
 }
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authError = validateBearerToken(request);
-  if (authError) return authError;
+  try {
+    const { id: discordId } = await params;
 
-  const resolvedParams = await params;
-  const discordId = resolvedParams.id;
-
-  const user = await getUserByDiscordId(discordId);
-  if (!user) {
-    return NextResponse.json(
-      { success: false, error: "USER_NOT_FOUND" },
-      { status: 404 }
-    );
-  }
-
-  const body = await request.json().catch(() => null);
-  const videoUrl = typeof body?.video_url === "string" ? body.video_url.trim() : "";
-  const leaderboardId =
-    typeof body?.leaderboard_id === "number" && Number.isInteger(body.leaderboard_id)
-      ? body.leaderboard_id
-      : null;
-
-  if (!videoUrl) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "VIDEO_URL_REQUIRED",
-        message: "Debes enviar la URL del video de TikTok.",
-      },
-      { status: 400 }
-    );
-  }
-
-  const parsedVideo = parseTikTokVideoUrl(videoUrl);
-  if (!parsedVideo) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "INVALID_VIDEO_URL",
-        message:
-          "URL inválida. Debe tener formato https://www.tiktok.com/@usuario/video/ID",
-      },
-      { status: 400 }
-    );
-  }
-
-  const connection = await getUserTikTokConnection(user.id);
-  if (!connection) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "TIKTOK_NOT_CONNECTED",
-        message: "No hay una cuenta de TikTok vinculada para este usuario.",
-      },
-      { status: 404 }
-    );
-  }
-
-  // Fetch video data from public TikTok API (no bearer needed).
-  const publicVideo = await fetchTikTokPublicVideoDetail(parsedVideo.videoId);
-
-  if (!publicVideo) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "VIDEO_NOT_FOUND",
-        message: "No se encontró ese video en TikTok.",
-      },
-      { status: 404 }
-    );
-  }
-
-  // Validate ownership: author from URL and from public API must match
-  // the linked TikTok account username.
-  const linkedUsername = connection.username || "";
-  const authorFromUrl = parsedVideo.username.toLowerCase();
-  const authorFromApi = publicVideo.author_unique_id.toLowerCase();
-
-  if (authorFromUrl !== authorFromApi) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "VIDEO_OWNER_MISMATCH",
-        message: "El video no pertenece a la cuenta de TikTok vinculada actualmente.",
-      },
-      { status: 400 }
-    );
-  }
-
-  if (
-    linkedUsername &&
-    linkedUsername.toLowerCase() !== authorFromApi
-  ) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "VIDEO_OWNER_MISMATCH",
-        message: "El video no pertenece a la cuenta de TikTok vinculada actualmente.",
-      },
-      { status: 400 }
-    );
-  }
-
-  let leaderboard = null;
-  const now = Math.floor(Date.now() / 1000);
-
-  if (leaderboardId !== null) {
-    leaderboard = await getTikTokLeaderboardForVideoAssociation(leaderboardId);
-
-    if (!leaderboard) {
+    const user = await getUserByDiscordId(discordId);
+    if (!user) {
       return NextResponse.json(
-        {
-          success: false,
-          error: "LEADERBOARD_NOT_FOUND",
-          message: "No se ha encontrado la leaderboard indicada.",
-        },
+        { success: false, error: "USER_NOT_FOUND" },
         { status: 404 }
       );
     }
 
-    const isActiveWindow = leaderboard.start_at <= now && leaderboard.end_at > now;
-    const allowsAssociation =
-      leaderboard.status === "active" ||
-      (leaderboard.status === "scheduled" && isActiveWindow);
+    if (user.is_banned) {
+      return fail(403, "USER_BANNED", "Tu cuenta no puede participar en las leaderboards.");
+    }
 
-    if (!allowsAssociation) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "LEADERBOARD_NOT_ACTIVE",
-          message: "Solo puedes vincular videos desde una leaderboard activa.",
-        },
-        { status: 400 }
+    const body = await request.json().catch(() => null);
+    const videoUrl = typeof body?.video_url === "string" ? body.video_url.trim() : "";
+    const leaderboardId =
+      typeof body?.leaderboard_id === "number" && Number.isInteger(body.leaderboard_id)
+        ? (body.leaderboard_id as number)
+        : null;
+
+    if (!videoUrl) {
+      return fail(400, "VIDEO_URL_REQUIRED", "Debes enviar la URL del video de TikTok.");
+    }
+
+    const connection = await getUserTikTokConnection(user.id);
+    if (!connection) {
+      return fail(
+        404,
+        "TIKTOK_NOT_CONNECTED",
+        "No hay una cuenta de TikTok vinculada para este usuario."
       );
     }
+
+    const videoId = await resolveTikTokVideoId(videoUrl);
+    if (!videoId) {
+      return fail(
+        400,
+        "INVALID_VIDEO_URL",
+        "URL inválida. Debe tener formato https://www.tiktok.com/@usuario/video/ID"
+      );
+    }
+
+    let leaderboard = null;
+    const now = Math.floor(Date.now() / 1000);
+
+    if (leaderboardId !== null) {
+      leaderboard = await getTikTokLeaderboardForVideoAssociation(leaderboardId);
+
+      if (!leaderboard) {
+        return fail(404, "LEADERBOARD_NOT_FOUND", "No se ha encontrado la leaderboard indicada.");
+      }
+
+      const isActiveWindow = leaderboard.start_at <= now && leaderboard.end_at > now;
+      const allowsAssociation =
+        isActiveWindow &&
+        (leaderboard.status === "active" || leaderboard.status === "scheduled");
+
+      if (!allowsAssociation) {
+        return fail(
+          400,
+          "LEADERBOARD_NOT_ACTIVE",
+          "Solo puedes vincular videos desde una leaderboard activa."
+        );
+      }
+    }
+
+    // La Display API solo devuelve vídeos de la cuenta del token: encontrarlo
+    // ahí es la prueba de que el vídeo es de la cuenta vinculada.
+    const video = await findOwnedTikTokVideo(connection, videoId);
+
+    if (!video) {
+      return fail(
+        404,
+        "VIDEO_NOT_FOUND",
+        "No se ha encontrado ese video entre los videos públicos de tu cuenta de TikTok vinculada."
+      );
+    }
+
+    if (leaderboard) {
+      // Solo cuentan los vídeos publicados dentro de la ventana de la leaderboard.
+      const createdAt = Number(video.create_time || 0);
+
+      if (!createdAt || createdAt < leaderboard.start_at || createdAt > leaderboard.end_at) {
+        return fail(
+          400,
+          "VIDEO_OUTSIDE_LEADERBOARD_WINDOW",
+          "El video se publicó fuera de las fechas de esta leaderboard y no puede participar."
+        );
+      }
+    }
+
+    const savedVideo = await saveAssociatedTikTokVideo({
+      userId: user.id,
+      openId: connection.open_id,
+      video: { ...video, id: videoId },
+      fallbackShareUrl: videoUrl,
+      leaderboardId: leaderboard ? leaderboard.id : null,
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        associated: true,
+        leaderboard_linked: savedVideo.leaderboard_id !== null,
+        leaderboard_id: savedVideo.leaderboard_id,
+        video: savedVideo,
+      },
+    });
+  } catch (error) {
+    if (error instanceof TikTokRelinkRequiredError) {
+      return fail(
+        409,
+        "TIKTOK_RELINK_REQUIRED",
+        "Tu vinculación con TikTok ha caducado. Vuelve a vincular tu cuenta."
+      );
+    }
+
+    if (error instanceof TikTokRuleError && error.code === "VIDEO_ALREADY_ASSOCIATED") {
+      return fail(409, "VIDEO_ALREADY_ASSOCIATED", "Ese video ya lo ha asociado otro usuario.");
+    }
+
+    if (error instanceof TikTokApiError) {
+      console.error("TikTok falló al verificar el vídeo:", error.code, error.message);
+      return fail(
+        502,
+        "TIKTOK_UNAVAILABLE",
+        "No se ha podido comprobar el video en TikTok. Inténtalo de nuevo en unos minutos."
+      );
+    }
+
+    console.error("Error asociando vídeo de TikTok:", error);
+    return NextResponse.json(
+      { success: false, error: "INTERNAL_SERVER_ERROR" },
+      { status: 500 }
+    );
   }
-
-  const videoCreatedAt = publicVideo.create_time || now;
-  const leaderboardLinked = Boolean(
-    leaderboard &&
-      videoCreatedAt >= leaderboard.start_at &&
-      videoCreatedAt <= leaderboard.end_at
-  );
-
-  const savedVideo = await upsertAssociatedTikTokVideo({
-    userId: user.id,
-    videoId: parsedVideo.videoId,
-    title: publicVideo.title || "Video sin titulo",
-    coverImageUrl: publicVideo.cover_image_url || null,
-    shareUrl: publicVideo.share_url || videoUrl,
-    likeCount: publicVideo.like_count,
-    viewCount: publicVideo.view_count,
-    commentCount: publicVideo.comment_count,
-    shareCount: publicVideo.share_count,
-    createdAt: videoCreatedAt,
-    leaderboardId: leaderboardLinked && leaderboard ? leaderboard.id : undefined,
-  });
-
-  return NextResponse.json({
-    success: true,
-    data: {
-      associated: true,
-      leaderboard_linked: leaderboardLinked,
-      leaderboard_id: leaderboardLinked && leaderboard ? leaderboard.id : null,
-      video: savedVideo,
-    },
-  });
 }

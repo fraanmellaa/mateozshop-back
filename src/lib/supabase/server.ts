@@ -1,6 +1,8 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
+import { SUPABASE_SCHEMA } from "./admin";
+
 function getSupabaseEnv() {
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -19,7 +21,7 @@ export async function createSupabaseServerClient() {
   const { supabaseUrl, supabaseServiceRoleKey } = getSupabaseEnv();
 
   return createServerClient(supabaseUrl, supabaseServiceRoleKey, {
-    db: { schema: "mateoz" },
+    db: { schema: SUPABASE_SCHEMA },
     cookies: {
       getAll() {
         return cookieStore.getAll();

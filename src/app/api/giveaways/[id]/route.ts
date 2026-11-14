@@ -12,7 +12,7 @@ export async function GET(
     return NextResponse.json(
       {
         success: false,
-        error: "Invalid giveaway ID",
+        error: "INVALID_GIVEAWAY_ID",
       },
       {
         status: 400,
@@ -26,14 +26,12 @@ export async function GET(
     return NextResponse.json(
       {
         success: false,
-        error: "Giveaway not found",
+        error: "GIVEAWAY_NOT_FOUND",
       },
       {
         status: 404,
       }
     );
-
-  giveaway.comments = [];
 
   return NextResponse.json(
     {

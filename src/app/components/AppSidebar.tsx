@@ -8,6 +8,9 @@ import {
   Trophy,
   LogOut,
   Medal,
+  Settings,
+  Gift,
+  Package,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -53,9 +56,24 @@ const items = [
     icon: Trophy,
   },
   {
+    title: "Cajas",
+    url: "/loot-boxes",
+    icon: Package,
+  },
+  {
+    title: "Bonos",
+    url: "/bonuses",
+    icon: Gift,
+  },
+  {
     title: "TikTok Leaderboards",
     url: "/tiktok-leaderboards",
     icon: Medal,
+  },
+  {
+    title: "Ajustes",
+    url: "/settings",
+    icon: Settings,
   },
 ];
 

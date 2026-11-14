@@ -1,103 +1,48 @@
-"use server";
+import { requireEnv } from "@/lib/env";
 
-import { kvGet, kvPut } from "@/lib/kv";
+let cachedToken: { token: string; expiresAt: number } | null = null;
 
-export const getAppAccessToken = async () => {
-  const cacheKey = "kick_auth_token";
-  const cached = await kvGet(cacheKey);
-  if (cached) {
-    const expires_in = cached.expires_in;
-    const created_at = cached.created_at;
-    if (Date.now() < created_at + expires_in * 1000) {
-      return cached.access_token;
-    }
+/**
+ * App Access Token de Kick (client credentials). Solo sirve para datos
+ * públicos (estado del directo). Caché en memoria por instancia.
+ */
+export const getAppAccessToken = async (): Promise<string> => {
+  if (cachedToken && Date.now() < cachedToken.expiresAt) {
+    return cachedToken.token;
   }
 
-  const res = await fetch(`https://id.kick.com/oauth/token`, {
+  const res = await fetch("https://id.kick.com/oauth/token", {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: new URLSearchParams({
-      client_id: process.env.NEXT_PUBLIC_KICK_CLIENT_ID || "",
-      client_secret: process.env.KICK_CLIENT_SECRET || "",
+      client_id: requireEnv("NEXT_PUBLIC_KICK_CLIENT_ID"),
+      client_secret: requireEnv("KICK_CLIENT_SECRET"),
       grant_type: "client_credentials",
     }),
+    signal: AbortSignal.timeout(8000),
   });
 
   if (!res.ok) {
-    throw new Error("Failed to fetch access token");
+    throw new Error(`Kick app token request failed (${res.status})`);
   }
 
   const data = await res.json();
+  if (typeof data?.access_token !== "string") {
+    throw new Error("Kick app token response without access_token");
+  }
 
-  await kvPut(cacheKey, {
-    access_token: data.access_token,
-    expires_in: data.expires_in,
-    created_at: Date.now(),
-  });
+  const expiresIn = Number(data.expires_in) || 3600;
+  cachedToken = {
+    token: data.access_token,
+    // Margen de un minuto para no usar un token a punto de caducar.
+    expiresAt: Date.now() + Math.max(expiresIn - 60, 60) * 1000,
+  };
 
-  return data.access_token;
+  return cachedToken.token;
 };
 
-export const getAccessToken = async () => {
-  const cacheKey = "kick_access_token";
-  const cached = await kvGet(cacheKey);
-  if (cached) {
-    const expires_in = cached.expires_in;
-    const created_at = cached.created_at;
-    if (Date.now() < created_at + expires_in * 1000) {
-      return cached.access_token;
-    }
-  }
-  const refresh_token = await kvGet("kick_refresh_token");
-
-  const res = await fetch(`https://id.kick.com/oauth/token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      client_id: process.env.NEXT_PUBLIC_KICK_CLIENT_ID!,
-      client_secret: process.env.KICK_CLIENT_SECRET!,
-      refresh_token: refresh_token.token,
-      grant_type: "refresh_token",
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error("Failed to refresh access token");
-  }
-
-  const data = await res.json();
-
-  await kvPut("kick_access_token", {
-    access_token: data.access_token,
-    expires_in: data.expires_in,
-    created_at: Date.now(),
-  });
-  await kvPut("kick_refresh_token", {
-    token: data.refresh_token,
-  });
-
-  return data.access_token;
-};
-
-export const getUserIdByUsername = async (username: string) => {
-  const appAccessToken = await getAppAccessToken();
-
-  const response = await fetch(
-    `https://api.kick.com/public/v1/channels?slug=${username}`,
-    {
-      headers: {
-        Authorization: `Bearer ${appAccessToken}`,
-        "Content-Type": "application/json",
-      },
-    }
-  );
-  const data = await response.json();
-  if (!response.ok || !data.data || data.data.length === 0) {
-    throw new Error(`User with username ${username} not found`);
-  }
-  return data.data[0].broadcaster_user_id;
+export const clearAppAccessToken = () => {
+  cachedToken = null;
 };

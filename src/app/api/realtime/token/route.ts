@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import * as Ably from "ably";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const apiKey = process.env.ABLY_API_KEY;
 
   if (!apiKey) {
@@ -13,19 +13,27 @@ export async function GET() {
     );
   }
 
-  const ably = new Ably.Rest(apiKey);
+  const discordId = request.nextUrl.searchParams.get("discord_id");
+  if (discordId !== null && !/^\d{1,32}$/.test(discordId)) {
+    return NextResponse.json(
+      { success: false, error: "INVALID_DISCORD_ID" },
+      { status: 400 }
+    );
+  }
 
-  // Frontend clients only need read access to live auction updates.
-  const capability = JSON.stringify({
+  // Solo suscripción. El canal privado es únicamente el del usuario indicado
+  // (el front lo saca de su sesión de servidor), nunca un comodín.
+  const capability: Record<string, string[]> = {
     auctions: ["subscribe"],
     "product-*": ["subscribe"],
-    "product:*": ["subscribe"],
-    "user-*": ["subscribe"],
-    "user:*": ["subscribe"],
-  });
+  };
+  if (discordId) {
+    capability[`user:${discordId}`] = ["subscribe"];
+  }
 
+  const ably = new Ably.Rest(apiKey);
   const tokenRequest = await ably.auth.createTokenRequest({
-    capability,
+    capability: JSON.stringify(capability),
     ttl: 1000 * 60 * 30,
   });
 

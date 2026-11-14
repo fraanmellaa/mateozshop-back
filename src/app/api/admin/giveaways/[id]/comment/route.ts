@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addGiveawayComment } from "@/app/utils/giveaways";
+import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
+import { addGiveawayComment } from "@/app/utils/giveaways/admin";
 
 // POST /api/admin/giveaways/[id]/comment - Agregar comentario
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!(await requireAdmin())) return adminUnauthorized();
+
   try {
     const { id: idParam } = await params;
     const id = parseInt(idParam);
@@ -19,7 +22,7 @@ export async function POST(
 
     const { message } = await request.json();
 
-    if (!message || message.trim() === "") {
+    if (typeof message !== "string" || message.trim() === "") {
       return NextResponse.json(
         { error: "El comentario no puede estar vacío" },
         { status: 400 }

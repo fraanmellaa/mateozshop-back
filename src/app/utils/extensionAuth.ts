@@ -1,80 +1,106 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SignJWT, jwtVerify } from "jose";
 
-const EXTENSION_JWT_SECRET =
-  process.env.EXTENSION_JWT_SECRET || process.env.JWT_SECRET || "your-secret-key";
+import { requireEnv } from "@/lib/env";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
-export type ExtensionTokenPayload = {
-  sub: string;
-  discordId: string;
-  role: "extension-user";
+export type ExtensionUser = {
+  id: number;
+  discord_id: string;
+  username: string;
+  image: string;
+  email: string;
+  kick_id: string | null;
+  kick_username: string | null;
+  total_points: number;
+  used_points: number;
+  is_banned: boolean;
+  /** Saldo disponible: total_points - used_points. */
+  points: number;
 };
 
-export async function signExtensionToken(discordId: string) {
-  const secret = new TextEncoder().encode(EXTENSION_JWT_SECRET);
+function extensionSecret() {
+  return new TextEncoder().encode(requireEnv("EXTENSION_JWT_SECRET"));
+}
 
-  return new SignJWT({
-    discordId,
-    role: "extension-user",
-  })
+export async function signExtensionToken(discordId: string) {
+  return new SignJWT({ discordId, role: "extension-user" })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(discordId)
     .setIssuedAt()
     .setExpirationTime("30d")
-    .sign(secret);
+    .sign(extensionSecret());
 }
 
-export function validateExtensionKey(request: NextRequest): NextResponse | null {
-  const configured = process.env.EXTENSION_API_KEY || process.env.API_BEARER_TOKEN;
-
-  if (!configured) {
-    return NextResponse.json(
-      { error: "EXTENSION_API_KEY_NOT_CONFIGURED" },
-      { status: 500 }
-    );
-  }
-
-  const key = request.headers.get("x-extension-key");
-  if (key !== configured) {
-    return NextResponse.json({ error: "UNAUTHORIZED_EXTENSION" }, { status: 401 });
-  }
-
-  return null;
+export function extensionError(error: string, status: number) {
+  return NextResponse.json({ success: false, error }, { status });
 }
 
-export async function verifyExtensionUser(request: NextRequest) {
+/**
+ * Autentica una petición de la extensión y carga su usuario de BD.
+ * No rechaza a los baneados: cada ruta decide (usa `user.is_banned`).
+ */
+export async function requireExtensionUser(
+  request: NextRequest
+): Promise<{ ok: true; user: ExtensionUser } | { ok: false; response: NextResponse }> {
   const auth = request.headers.get("authorization") || "";
   const match = auth.match(/^Bearer\s+(.+)$/i);
 
   if (!match) {
-    return {
-      ok: false as const,
-      response: NextResponse.json({ error: "EXTENSION_TOKEN_REQUIRED" }, { status: 401 }),
-    };
+    return { ok: false, response: extensionError("EXTENSION_TOKEN_REQUIRED", 401) };
   }
 
+  let discordId: string | null = null;
   try {
-    const secret = new TextEncoder().encode(EXTENSION_JWT_SECRET);
-    const { payload } = await jwtVerify(match[1], secret);
-
-    const discordId = typeof payload.discordId === "string" ? payload.discordId : null;
-    const role = payload.role;
-
-    if (!discordId || role !== "extension-user") {
-      return {
-        ok: false as const,
-        response: NextResponse.json({ error: "INVALID_EXTENSION_TOKEN" }, { status: 401 }),
-      };
+    const { payload } = await jwtVerify(match[1], extensionSecret(), {
+      algorithms: ["HS256"],
+    });
+    if (payload.role === "extension-user" && typeof payload.discordId === "string") {
+      discordId = payload.discordId;
     }
-
-    return {
-      ok: true as const,
-      discordId,
-    };
   } catch {
-    return {
-      ok: false as const,
-      response: NextResponse.json({ error: "INVALID_EXTENSION_TOKEN" }, { status: 401 }),
-    };
+    discordId = null;
   }
+
+  if (!discordId) {
+    return { ok: false, response: extensionError("INVALID_EXTENSION_TOKEN", 401) };
+  }
+
+  const { data, error } = await getSupabaseAdmin()
+    .from("users")
+    .select(
+      "id, discord_id, username, image, email, kick_id, kick_username, total_points, used_points, is_banned"
+    )
+    .eq("discord_id", discordId)
+    .limit(1);
+
+  if (error) {
+    console.error("Error loading extension user:", error);
+    return { ok: false, response: extensionError("INTERNAL_SERVER_ERROR", 500) };
+  }
+
+  const row = data?.[0];
+  if (!row) {
+    return { ok: false, response: extensionError("USER_NOT_FOUND", 404) };
+  }
+
+  const total = Number(row.total_points || 0);
+  const used = Number(row.used_points || 0);
+
+  return {
+    ok: true,
+    user: {
+      id: row.id,
+      discord_id: row.discord_id,
+      username: row.username,
+      image: row.image,
+      email: row.email,
+      kick_id: row.kick_id ?? null,
+      kick_username: row.kick_username ?? null,
+      total_points: total,
+      used_points: used,
+      is_banned: Boolean(row.is_banned),
+      points: total - used,
+    },
+  };
 }

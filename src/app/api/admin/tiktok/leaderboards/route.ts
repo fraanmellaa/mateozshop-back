@@ -1,11 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
 import {
   createTikTokLeaderboard,
   getAdminTikTokLeaderboards,
 } from "@/app/utils/tiktok/leaderboards";
 
+const VALIDATION_ERRORS = new Set([
+  "LEADERBOARD_TITLE_REQUIRED",
+  "LEADERBOARD_INVALID_DATES",
+  "LEADERBOARD_INVALID_RANGE",
+  "LEADERBOARD_END_IN_PAST",
+  "LEADERBOARD_PRIZES_REQUIRED",
+  "LEADERBOARD_PRIZES_DUPLICATED_POSITION",
+  "LEADERBOARD_OVERLAP_NOT_ALLOWED",
+]);
+
 export async function GET() {
+  if (!(await requireAdmin())) return adminUnauthorized();
+
   try {
     const leaderboards = await getAdminTikTokLeaderboards();
     return NextResponse.json({ success: true, result: leaderboards });
@@ -19,8 +32,10 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  if (!(await requireAdmin())) return adminUnauthorized();
+
   try {
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
 
     const leaderboard = await createTikTokLeaderboard({
       title: String(body?.title || ""),
@@ -40,14 +55,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "UNKNOWN_ERROR";
 
-    if (
-      message === "LEADERBOARD_TITLE_REQUIRED" ||
-      message === "LEADERBOARD_INVALID_DATES" ||
-      message === "LEADERBOARD_INVALID_RANGE" ||
-      message === "LEADERBOARD_PRIZES_REQUIRED" ||
-      message === "LEADERBOARD_PRIZES_DUPLICATED_POSITION" ||
-      message === "LEADERBOARD_OVERLAP_NOT_ALLOWED"
-    ) {
+    if (VALIDATION_ERRORS.has(message)) {
       return NextResponse.json(
         { success: false, error: message },
         { status: 400 }

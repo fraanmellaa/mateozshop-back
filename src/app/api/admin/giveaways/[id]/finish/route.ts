@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
 import { finishGiveaway } from "@/app/utils/giveaways/admin";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!(await requireAdmin())) return adminUnauthorized();
+
   try {
     const { id: idParam } = await params;
     const id = parseInt(idParam);
@@ -20,7 +23,7 @@ export async function POST(
 
     if (!giveaway) {
       return NextResponse.json(
-        { error: "Sorteo no encontrado" },
+        { error: "Sorteo no encontrado o ya cerrado" },
         { status: 404 }
       );
     }

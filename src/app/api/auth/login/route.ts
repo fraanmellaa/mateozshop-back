@@ -1,35 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SignJWT } from "jose";
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
+import { ADMIN_COOKIE } from "@/app/utils/auth";
+import { requireEnv, safeEqual } from "@/lib/env";
 
 export async function POST(request: NextRequest) {
   try {
-    const { username, password } = await request.json();
+    const body = await request.json().catch(() => null);
+    const username = typeof body?.username === "string" ? body.username : "";
+    const password = typeof body?.password === "string" ? body.password : "";
 
-    // Verificar credenciales con variables de entorno
-    const adminUsername = process.env.USER_NAME_ADMIN;
-    const adminPassword = process.env.USER_PASSWORD_ADMIN;
+    const adminUsername = requireEnv("USER_NAME_ADMIN");
+    const adminPassword = requireEnv("USER_PASSWORD_ADMIN");
 
-    if (!adminUsername || !adminPassword) {
-      return NextResponse.json(
-        { error: "Configuración de administrador no encontrada" },
-        { status: 500 }
-      );
-    }
+    // Se evalúan las dos comparaciones siempre (sin cortocircuito).
+    const userOk = safeEqual(username, adminUsername);
+    const passwordOk = safeEqual(password, adminPassword);
 
-    console.log(adminPassword);
-    console.log(password);
-
-    if (username !== adminUsername || password !== adminPassword) {
+    if (!userOk || !passwordOk) {
       return NextResponse.json(
         { error: "Credenciales inválidas" },
         { status: 401 }
       );
     }
 
-    // Crear token JWT con expiración de 2 horas usando jose
-    const secret = new TextEncoder().encode(JWT_SECRET);
+    const secret = new TextEncoder().encode(requireEnv("JWT_SECRET"));
     const token = await new SignJWT({
       username: adminUsername,
       role: "admin",
@@ -39,18 +34,16 @@ export async function POST(request: NextRequest) {
       .setExpirationTime("2h")
       .sign(secret);
 
-    // Crear respuesta con cookie segura
     const response = NextResponse.json(
       { success: true, message: "Autenticación exitosa" },
       { status: 200 }
     );
 
-    // Configurar cookie con el token
-    response.cookies.set("admin-session", token, {
+    response.cookies.set(ADMIN_COOKIE, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 2 * 60 * 60, // 2 horas en segundos
+      maxAge: 2 * 60 * 60,
       path: "/",
     });
 

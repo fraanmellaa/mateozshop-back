@@ -13,7 +13,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { DecoratedGiveaway } from "../utils/giveaways/admin";
+import type { DecoratedGiveaway } from "../utils/giveaways/admin";
+import { fromDateTimeLocal, toDateTimeLocal } from "../utils/datetime";
 
 interface EditGiveawayModalProps {
   isOpen: boolean;
@@ -41,17 +42,18 @@ export default function EditGiveawayModal({
 
   useEffect(() => {
     if (giveaway) {
-      const startDate = new Date(giveaway.start_at * 1000);
-      const endDate = new Date(giveaway.end_at * 1000);
+      // Fecha y hora en hora local, igual que se interpretan al guardar.
+      const [startDate, startTime] = toDateTimeLocal(giveaway.start_at).split("T");
+      const [endDate, endTime] = toDateTimeLocal(giveaway.end_at).split("T");
 
       setFormData({
         title: giveaway.title,
         image: giveaway.image,
         cost: giveaway.cost.toString(),
-        start_date: startDate.toISOString().split("T")[0],
-        start_time: startDate.toTimeString().slice(0, 5),
-        end_date: endDate.toISOString().split("T")[0],
-        end_time: endDate.toTimeString().slice(0, 5),
+        start_date: startDate,
+        start_time: startTime,
+        end_date: endDate,
+        end_time: endTime,
       });
     }
   }, [giveaway]);
@@ -64,13 +66,12 @@ export default function EditGiveawayModal({
 
     try {
       // Convertir fechas y horas a timestamps Unix
-      const startDateTime = new Date(
+      const start_at = fromDateTimeLocal(
         `${formData.start_date}T${formData.start_time}`
       );
-      const endDateTime = new Date(`${formData.end_date}T${formData.end_time}`);
-
-      const start_at = Math.floor(startDateTime.getTime() / 1000);
-      const end_at = Math.floor(endDateTime.getTime() / 1000);
+      const end_at = fromDateTimeLocal(
+        `${formData.end_date}T${formData.end_time}`
+      );
 
       const response = await fetch(`/api/admin/giveaways/${giveaway.id}`, {
         method: "PUT",

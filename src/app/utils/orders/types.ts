@@ -22,6 +22,10 @@ export type OrderDetail = {
   status: number;
   total: number;
   created_at: string;
+  /** Código entregado con el pedido, si lo lleva. */
+  delivered_code: string | null;
+  /** Resultado del último envío del código por email (null: sin código). */
+  code_email_sent: boolean | null;
   user: {
     id: number;
     username: string;

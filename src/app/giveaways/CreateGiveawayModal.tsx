@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { fromDateTimeLocal } from "../utils/datetime";
 import { Plus, X } from "lucide-react";
 
 interface CreateGiveawayModalProps {
@@ -60,13 +61,12 @@ export default function CreateGiveawayModal({
 
     try {
       // Convertir fechas y horas a timestamps Unix
-      const startDateTime = new Date(
+      const start_at = fromDateTimeLocal(
         `${formData.start_date}T${formData.start_time}`
       );
-      const endDateTime = new Date(`${formData.end_date}T${formData.end_time}`);
-
-      const start_at = Math.floor(startDateTime.getTime() / 1000);
-      const end_at = Math.floor(endDateTime.getTime() / 1000);
+      const end_at = fromDateTimeLocal(
+        `${formData.end_date}T${formData.end_time}`
+      );
 
       const response = await fetch("/api/admin/giveaways", {
         method: "POST",

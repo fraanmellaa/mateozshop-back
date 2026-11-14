@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
 import { setUserBannedStatusById } from "@/app/utils/users";
 
 const bodySchema = z.object({
@@ -11,6 +12,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!(await requireAdmin())) return adminUnauthorized();
+
   try {
     const { id: idParam } = await params;
     const userId = Number(idParam);
@@ -36,7 +39,7 @@ export async function PUT(
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { success: false, error: "INVALID_REQUEST_BODY", details: error.flatten() },
+        { success: false, error: "INVALID_REQUEST_BODY", details: z.flattenError(error) },
         { status: 400 }
       );
     }

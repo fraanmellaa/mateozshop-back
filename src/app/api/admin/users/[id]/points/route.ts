@@ -1,21 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
+import { PointsError } from "@/app/utils/points";
 import {
   addPointsToUserById,
   removeAvailablePointsFromUserById,
   resetUserPointsById,
 } from "@/app/utils/users";
 
-const bodySchema = z.object({
-  action: z.enum(["add", "remove", "reset"]),
-  amount: z.number().int().positive().optional(),
-});
+const amountSchema = z.number().int().positive().max(1_000_000_000);
+
+const bodySchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("add"), amount: amountSchema }),
+  z.object({ action: z.literal("remove"), amount: amountSchema }),
+  z.object({ action: z.literal("reset") }),
+]);
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!(await requireAdmin())) return adminUnauthorized();
+
   try {
     const { id: idParam } = await params;
     const userId = Number(idParam);
@@ -32,12 +39,9 @@ export async function POST(
     let user = null;
 
     if (body.action === "add") {
-      user = await addPointsToUserById(userId, Number(body.amount || 0));
+      user = await addPointsToUserById(userId, body.amount);
     } else if (body.action === "remove") {
-      user = await removeAvailablePointsFromUserById(
-        userId,
-        Number(body.amount || 0)
-      );
+      user = await removeAvailablePointsFromUserById(userId, body.amount);
     } else {
       user = await resetUserPointsById(userId);
     }
@@ -53,18 +57,19 @@ export async function POST(
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { success: false, error: "INVALID_REQUEST_BODY", details: error.flatten() },
+        {
+          success: false,
+          error: "INVALID_REQUEST_BODY",
+          details: z.flattenError(error),
+        },
         { status: 400 }
       );
     }
 
-    if (
-      error instanceof Error &&
-      error.message === "INSUFFICIENT_AVAILABLE_POINTS"
-    ) {
+    if (error instanceof PointsError) {
       return NextResponse.json(
-        { success: false, error: "INSUFFICIENT_AVAILABLE_POINTS" },
-        { status: 400 }
+        { success: false, error: error.code },
+        { status: error.code === "USER_NOT_FOUND" ? 404 : 400 }
       );
     }
 

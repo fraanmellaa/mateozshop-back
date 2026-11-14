@@ -9,7 +9,10 @@ import {
   Calendar,
   Trophy,
   CreditCard,
+  Unlink,
 } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 
@@ -21,6 +24,36 @@ export default function UserDetail({ user }: UserDetailProps) {
   const router = useRouter();
   const userDate = new Date(user.created_at);
   const isBanned = Boolean(user.is_banned);
+  const [isUnlinking, setIsUnlinking] = useState(false);
+
+  const handleUnlinkKick = async () => {
+    if (
+      !window.confirm(
+        `¿Desvincular la cuenta de Kick de ${user.username}? Tendrá que volver a vincularla para canjear.`
+      )
+    ) {
+      return;
+    }
+
+    setIsUnlinking(true);
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}/kick`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error("UNLINK_KICK_FAILED");
+      }
+
+      toast.success("Cuenta de Kick desvinculada");
+      router.refresh();
+    } catch (error) {
+      console.error("Error unlinking Kick account:", error);
+      toast.error("Error al desvincular la cuenta de Kick");
+    } finally {
+      setIsUnlinking(false);
+    }
+  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -94,10 +127,10 @@ export default function UserDetail({ user }: UserDetailProps) {
           </div>
           <div>
             <label className="text-sm font-medium text-muted-foreground">
-              Código de Verificación
+              Usuario de Kick
             </label>
             <p className="text-lg font-mono text-foreground">
-              {user.verification_code}
+              {user.kick_username || "No vinculado"}
             </p>
           </div>
           <div>
@@ -173,6 +206,17 @@ export default function UserDetail({ user }: UserDetailProps) {
             <Trophy className="h-4 w-4" />
             Ver Sorteos
           </Button>
+          {user.kick_id && (
+            <Button
+              variant="destructive"
+              onClick={handleUnlinkKick}
+              disabled={isUnlinking}
+              className="flex items-center gap-2"
+            >
+              <Unlink className="h-4 w-4" />
+              {isUnlinking ? "Desvinculando..." : "Desvincular Kick"}
+            </Button>
+          )}
         </div>
       </div>
 

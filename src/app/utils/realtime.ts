@@ -84,17 +84,8 @@ export async function publishUserNotification(payload: {
   const ably = getAbly();
   if (!ably) return;
 
-  const channelNames = [
-    `user-${payload.discordId}`,
-    `user:${payload.discordId}`,
-  ];
-
-  await Promise.all(
-    channelNames.map((channelName) =>
-      ably.channels.get(channelName).publish("notify", {
-        ...payload,
-        at: Date.now(),
-      })
-    )
-  );
+  await ably.channels.get(`user:${payload.discordId}`).publish("notify", {
+    ...payload,
+    at: Date.now(),
+  });
 }

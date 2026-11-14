@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ColumnDef } from "@tanstack/react-table";
-import { ProductRow } from "@/app/utils/products";
+import type { ProductRow } from "@/app/utils/products";
 import { Button } from "@/components/ui/button";
 import { ArrowUpDown, MoreHorizontal, Plus, Edit, Trash2 } from "lucide-react";
 import {
@@ -179,6 +179,11 @@ export default function PageBody({ products }: { products: ProductRow[] }) {
                 }
               >
                 Copiar ID
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => router.push(`/products/${product.id}`)}
+              >
+                Ver detalle y códigos
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

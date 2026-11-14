@@ -1,15 +1,19 @@
-"use server";
-
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { creditPoints, resetPoints, revokePoints } from "@/app/utils/points";
 import { User } from "./types";
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    db: { schema: "mateoz" },
-  }
-);
+export type { User };
+
+const UNIQUE_VIOLATION = "23505";
+
+type DbError = { code?: string; message?: string; details?: string | null };
+
+function violates(error: DbError, column: string) {
+  return (
+    error.code === UNIQUE_VIOLATION &&
+    `${error.message || ""} ${error.details || ""}`.includes(column)
+  );
+}
 
 function mapUserRow(user: Record<string, unknown>) {
   return {
@@ -21,8 +25,23 @@ function mapUserRow(user: Record<string, unknown>) {
   } as User;
 }
 
+/** Campos que se devuelven al front (contrato de /api/user). */
+export function toPublicUser(user: User) {
+  return {
+    id: user.id,
+    username: user.username,
+    image: user.image,
+    actual_points: user.actual_points,
+    kick_id: user.kick_id ?? null,
+    kick_username: user.kick_username ?? null,
+    is_banned: Boolean(user.is_banned),
+  };
+}
+
 export const getUsers = async () => {
-  const { data: usersData, error } = await supabase.from("users").select("*");
+  const { data: usersData, error } = await getSupabaseAdmin()
+    .from("users")
+    .select("*");
   if (error) {
     throw error;
   }
@@ -33,7 +52,7 @@ export const getUsers = async () => {
 };
 
 export const getUserByDiscordId = async (discordId: string) => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseAdmin()
     .from("users")
     .select("*")
     .eq("discord_id", discordId)
@@ -42,17 +61,11 @@ export const getUserByDiscordId = async (discordId: string) => {
     throw error;
   }
 
-  const userData = data.length ? data[0] : null;
-
-  if (!userData) {
-    return null;
-  }
-
-  return mapUserRow(userData);
+  return data?.[0] ? mapUserRow(data[0]) : null;
 };
 
 export const getUserByKickId = async (kickId: string) => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseAdmin()
     .from("users")
     .select("*")
     .eq("kick_id", kickId)
@@ -62,122 +75,49 @@ export const getUserByKickId = async (kickId: string) => {
     throw error;
   }
 
-  const userData = data.length ? data[0] : null;
-
-  if (!userData) {
-    return null;
-  }
-
-  return mapUserRow(userData);
+  return data?.[0] ? mapUserRow(data[0]) : null;
 };
 
-export const updateTotalPoints = async (kickId: string, points: number) => {
-  const { data: updatedUser, error } = await supabase
+export const getUserById = async (userId: number) => {
+  const { data, error } = await getSupabaseAdmin()
     .from("users")
-    .update({ total_points: points })
-    .eq("kick_id", kickId.toString())
-    .select("*");
+    .select("*")
+    .eq("id", userId)
+    .limit(1);
 
   if (error) {
     throw error;
   }
 
-  return updatedUser.length ? updatedUser[0] : null;
+  return data?.[0] ? mapUserRow(data[0]) : null;
 };
 
-export const updateUsedPoints = async (kickId: string, points: number) => {
-  const { data: updatedUser, error } = await supabase
-    .from("users")
-    .update({ used_points: points })
-    .eq("kick_id", kickId.toString())
-    .select("*");
-
-  if (error) {
-    throw error;
-  }
-
-  return updatedUser.length ? updatedUser[0] : null;
-};
+// Los cambios de saldo van siempre por utils/points (funciones SQL atómicas
+// con registro). Lanzan PointsError (USER_NOT_FOUND, INSUFFICIENT_POINTS...).
 
 export const addPointsToUserById = async (userId: number, amount: number) => {
-  const { data: rows, error } = await supabase
-    .from("users")
-    .select("*")
-    .eq("id", userId)
-    .limit(1);
-
-  if (error) throw error;
-
-  const user = rows?.[0];
-  if (!user) return null;
-
-  const nextTotalPoints = Number(user.total_points || 0) + amount;
-
-  const { data: updatedRows, error: updateError } = await supabase
-    .from("users")
-    .update({ total_points: nextTotalPoints })
-    .eq("id", userId)
-    .select("*")
-    .limit(1);
-
-  if (updateError) throw updateError;
-
-  return updatedRows?.[0] ? mapUserRow(updatedRows[0]) : null;
+  await creditPoints(userId, amount, { kind: "admin_add" });
+  return getUserById(userId);
 };
 
 export const removeAvailablePointsFromUserById = async (
   userId: number,
   amount: number
 ) => {
-  const { data: rows, error } = await supabase
-    .from("users")
-    .select("*")
-    .eq("id", userId)
-    .limit(1);
-
-  if (error) throw error;
-
-  const user = rows?.[0];
-  if (!user) return null;
-
-  const totalPoints = Number(user.total_points || 0);
-  const usedPoints = Number(user.used_points || 0);
-  const availablePoints = totalPoints - usedPoints;
-
-  if (amount > availablePoints) {
-    throw new Error("INSUFFICIENT_AVAILABLE_POINTS");
-  }
-
-  const { data: updatedRows, error: updateError } = await supabase
-    .from("users")
-    .update({ total_points: totalPoints - amount })
-    .eq("id", userId)
-    .select("*")
-    .limit(1);
-
-  if (updateError) throw updateError;
-
-  return updatedRows?.[0] ? mapUserRow(updatedRows[0]) : null;
+  await revokePoints(userId, amount, { kind: "admin_remove" });
+  return getUserById(userId);
 };
 
 export const resetUserPointsById = async (userId: number) => {
-  const { data: updatedRows, error } = await supabase
-    .from("users")
-    .update({ total_points: 0, used_points: 0 })
-    .eq("id", userId)
-    .select("*")
-    .limit(1);
-
-  if (error) throw error;
-
-  return updatedRows?.[0] ? mapUserRow(updatedRows[0]) : null;
+  await resetPoints(userId);
+  return getUserById(userId);
 };
 
 export const setUserBannedStatusById = async (
   userId: number,
   isBanned: boolean
 ) => {
-  const { data: updatedRows, error } = await supabase
+  const { data: updatedRows, error } = await getSupabaseAdmin()
     .from("users")
     .update({ is_banned: isBanned })
     .eq("id", userId)
@@ -189,95 +129,145 @@ export const setUserBannedStatusById = async (
   return updatedRows?.[0] ? mapUserRow(updatedRows[0]) : null;
 };
 
+/**
+ * Alta o actualización del usuario al iniciar sesión con Discord.
+ * `username` es UNIQUE en BD pero el nombre visible de Discord no lo es: si
+ * choca se guarda con un sufijo sacado del discord_id.
+ * Lanza Error("EMAIL_ALREADY_REGISTERED") si el email ya es de otra cuenta.
+ */
 export const createUser = async (user: {
   name: string;
   user_id: string;
   profile_picture: string;
   email: string;
 }) => {
-  const payload = {
-      username: user.name,
-      discord_id: user.user_id.toString(),
-      kick_id: null,
-      image: user.profile_picture,
-      email: user.email,
-      total_points: 0,
-      used_points: 0,
-      created_at: Math.floor(Date.now() / 1000), // Store as Unix timestamp
-    };
+  const supabase = getSupabaseAdmin();
+  const discordId = user.user_id.toString();
+  const fallbackNames = [
+    `${user.name}_${discordId.slice(-4)}`,
+    `${user.name}_${discordId}`,
+  ];
 
-  const { data: createdUser, error } = await supabase
-    .from("users")
-    .upsert(payload, { onConflict: "discord_id", ignoreDuplicates: true })
-    .select("*");
+  const existing = await getUserByDiscordId(discordId);
 
-  if (error) {
+  if (existing) {
+    const nameChanged =
+      existing.username !== user.name &&
+      !fallbackNames.includes(existing.username);
+    const imageChanged = existing.image !== user.profile_picture;
+
+    if (!nameChanged && !imageChanged) return existing;
+
+    // Si el nombre nuevo ya lo tiene otro, se conserva el actual.
+    const attempts: Record<string, string>[] = nameChanged
+      ? [
+          { username: user.name, image: user.profile_picture },
+          { image: user.profile_picture },
+        ]
+      : [{ image: user.profile_picture }];
+
+    for (const changes of attempts) {
+      const { data, error } = await supabase
+        .from("users")
+        .update(changes)
+        .eq("id", existing.id)
+        .select("*")
+        .limit(1);
+
+      if (!error) return data?.[0] ? mapUserRow(data[0]) : existing;
+      if (!violates(error, "username")) throw error;
+    }
+
+    return existing;
+  }
+
+  for (const username of [user.name, ...fallbackNames]) {
+    const { data, error } = await supabase
+      .from("users")
+      .insert({
+        username,
+        discord_id: discordId,
+        kick_id: null,
+        image: user.profile_picture,
+        email: user.email,
+        total_points: 0,
+        used_points: 0,
+        created_at: Math.floor(Date.now() / 1000),
+      })
+      .select("*")
+      .limit(1);
+
+    if (!error) return data?.[0] ? mapUserRow(data[0]) : null;
+
+    if (violates(error, "username")) continue;
+    // Dos altas a la vez del mismo usuario: la otra ya lo ha creado.
+    if (violates(error, "discord_id")) return getUserByDiscordId(discordId);
+    if (violates(error, "email")) throw new Error("EMAIL_ALREADY_REGISTERED");
     throw error;
   }
 
-  if (createdUser.length === 0) {
-    const { data: existingUser, error: existingError } = await supabase
-      .from("users")
-      .select("*")
-      .eq("discord_id", user.user_id);
-
-    if (existingError) {
-      throw existingError;
-    }
-
-    if (existingUser.length > 0) {
-      return {
-        ...existingUser[0],
-        actual_points:
-          existingUser[0].total_points - existingUser[0].used_points,
-      };
-    }
-
-    return null;
-  }
-
-  return {
-    ...createdUser[0],
-    actual_points: 0,
-  };
+  throw new Error("USERNAME_UNAVAILABLE");
 };
 
+export type KickLinkErrorCode =
+  | "KICK_ALREADY_LINKED"
+  | "KICK_ACCOUNT_ALREADY_LINKED";
+
+export class KickLinkError extends Error {
+  code: KickLinkErrorCode;
+
+  constructor(code: KickLinkErrorCode) {
+    super(code);
+    this.name = "KickLinkError";
+    this.code = code;
+  }
+}
+
+/**
+ * Vincula una cuenta de Kick. Solo si el usuario no tiene ya una
+ * (KICK_ALREADY_LINKED) y esa cuenta no es de otro usuario
+ * (KICK_ACCOUNT_ALREADY_LINKED, por el índice único de `kick_id`).
+ * Devuelve null si el usuario no existe.
+ */
 export const linkKickAccount = async (
   userId: number,
   kickId: string,
   kickUsername: string
 ) => {
-  const { data: updatedUser, error } = await supabase
+  const { data, error } = await getSupabaseAdmin()
     .from("users")
     .update({
       kick_id: kickId,
       kick_username: kickUsername,
     })
     .eq("id", userId)
-    .select("*");
+    .is("kick_id", null)
+    .select("*")
+    .limit(1);
 
   if (error) {
+    if (error.code === UNIQUE_VIOLATION) {
+      throw new KickLinkError("KICK_ACCOUNT_ALREADY_LINKED");
+    }
     throw error;
   }
 
-  return updatedUser.length ? updatedUser[0] : null;
+  if (data?.[0]) return mapUserRow(data[0]);
+
+  const current = await getUserById(userId);
+  if (current?.kick_id) throw new KickLinkError("KICK_ALREADY_LINKED");
+  return null;
 };
 
-export const getUserById = async (userId: number) => {
-  const { data: resUser, error } = await supabase
+export const unlinkKickAccount = async (userId: number) => {
+  const { data, error } = await getSupabaseAdmin()
     .from("users")
+    .update({ kick_id: null, kick_username: null })
+    .eq("id", userId)
     .select("*")
-    .eq("id", userId);
+    .limit(1);
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 
-  const userData = resUser.length ? resUser[0] : null;
-
-  if (!userData) {
-    return null;
-  }
-
-  return mapUserRow(userData);
+  return data?.[0] ? mapUserRow(data[0]) : null;
 };

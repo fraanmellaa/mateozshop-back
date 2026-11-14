@@ -94,6 +94,15 @@ export default function ChangeOrderStatusModal({
             </select>
           </div>
 
+          {selectedStatus === 2 && currentStatus !== 2 && (
+            <div className="p-3 bg-red-50 dark:bg-red-950/20 rounded-md">
+              <p className="text-sm text-red-800 dark:text-red-200">
+                Al cancelar se devuelven los puntos al usuario y el pedido no
+                se podrá reabrir.
+              </p>
+            </div>
+          )}
+
           {selectedStatus !== currentStatus && (
             <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-md">
               <p className="text-sm text-blue-800 dark:text-blue-200">

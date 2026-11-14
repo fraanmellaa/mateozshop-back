@@ -1,5 +1,3 @@
-"use server";
-
 import {
   REDEEM_PRODUCT_NO_DIRECT_REWARD,
   REDEEM_PRODUCT_WITH_DIRECT_REWARD,
@@ -97,8 +95,9 @@ async function deliverEmail(params: {
   }
 }
 
+/** Devuelve false si el email no se pudo enviar (sin destinatario, sin Resend o error). */
 export const sendEmail = async (
-  to: string,
+  to: string | null | undefined,
   type: string,
   code?: string
 ): Promise<boolean> => {
@@ -110,18 +109,15 @@ export const sendEmail = async (
       break;
 
     case "PRODUCT_WITH_REWARD":
-      emailTemplate = {
-        ...REDEEM_PRODUCT_WITH_DIRECT_REWARD,
-        html: REDEEM_PRODUCT_WITH_DIRECT_REWARD.html,
-      };
       if (!code) return false;
-      emailTemplate.html = emailTemplate.html.replace(/\{\{code\}\}/i, code);
+      emailTemplate = { ...REDEEM_PRODUCT_WITH_DIRECT_REWARD };
+      emailTemplate.html = emailTemplate.html.replace(/\{\{code\}\}/i, () => escapeHtml(code));
       break;
     default:
       break;
   }
 
-  if (!emailTemplate) return false;
+  if (!emailTemplate || !to) return false;
 
   return deliverEmail({
     to,

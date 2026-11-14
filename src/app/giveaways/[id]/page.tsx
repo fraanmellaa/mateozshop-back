@@ -1,4 +1,4 @@
-import { getGiveawayById } from "@/app/utils/giveaways";
+import { getAdminGiveawayById } from "@/app/utils/giveaways/admin";
 import { notFound } from "next/navigation";
 import Image from "next/image";
 import GiveawayDetailClient from "./GiveawayDetailClient";
@@ -16,7 +16,7 @@ export default async function GiveawayDetailPage({
     return notFound();
   }
 
-  const giveaway = await getGiveawayById(giveawayId);
+  const giveaway = await getAdminGiveawayById(giveawayId);
 
   if (!giveaway) {
     return notFound();
@@ -147,7 +147,16 @@ export default async function GiveawayDetailPage({
 
         {/* Sidebar - Comentarios y acciones */}
         <div className="lg:col-span-1">
-          <GiveawayDetailClient giveaway={giveaway} status={status} />
+          <GiveawayDetailClient
+            giveaway={{
+              id: giveaway.id,
+              title: giveaway.title,
+              comments: giveaway.comments,
+              winners: giveaway.winners,
+              winnerEmail: giveaway.winnerEmail,
+            }}
+            status={status}
+          />
         </div>
       </div>
     </div>

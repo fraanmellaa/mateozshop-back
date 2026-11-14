@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProducts, createProduct } from "@/app/utils/products";
+import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
+import { getAdminProducts, createProduct } from "@/app/utils/products";
 
 export async function GET() {
+  if (!(await requireAdmin())) return adminUnauthorized();
+
   try {
-    const products = await getProducts();
+    const products = await getAdminProducts();
     return NextResponse.json(products);
   } catch (error) {
     console.error("Error fetching products:", error);
@@ -15,6 +18,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  if (!(await requireAdmin())) return adminUnauthorized();
+
   try {
     const body = await request.json();
     const {

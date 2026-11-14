@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ProductRow } from "@/app/utils/products";
+import type { ProductRow } from "@/app/utils/products";
+import { fromDateTimeLocal, toDateTimeLocal } from "@/app/utils/datetime";
 
 interface EditProductModalProps {
   isOpen: boolean;
@@ -22,78 +23,104 @@ interface EditProductModalProps {
   product: ProductRow | null;
 }
 
+const EMPTY_FORM = {
+  name: "",
+  description: "",
+  image: "",
+  price: "",
+  stock: "",
+  is_auction: false,
+  min_bid_increment: "1",
+  auction_cooldown_seconds: "300",
+  auction_ends_at: "",
+  sendable: false,
+  codesText: "",
+};
+
+function toForm(product: ProductRow): typeof EMPTY_FORM {
+  return {
+    name: product.name,
+    description: product.description,
+    image: product.image,
+    price: product.price.toString(),
+    stock: product.stock.toString(),
+    is_auction: product.is_auction || false,
+    min_bid_increment: String(product.min_bid_increment || 1),
+    auction_cooldown_seconds: String(product.auction_cooldown_seconds || 300),
+    auction_ends_at: product.auction_ends_at
+      ? toDateTimeLocal(product.auction_ends_at)
+      : "",
+    sendable: product.sendable || false,
+    codesText: (product.codes || []).join("\n"),
+  };
+}
+
 export default function EditProductModal({
   isOpen,
   onClose,
   onSuccess,
   product,
 }: EditProductModalProps) {
-  const [formData, setFormData] = useState({
-    name: "",
-    description: "",
-    image: "",
-    price: "",
-    stock: "",
-    is_auction: false,
-    min_bid_increment: "1",
-    auction_cooldown_seconds: "300",
-    auction_ends_at: "",
-    sendable: false,
-    codesText: "",
-  });
+  const [formData, setFormData] = useState(EMPTY_FORM);
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     if (product) {
-      setFormData({
-        name: product.name,
-        description: product.description,
-        image: product.image,
-        price: product.price.toString(),
-        stock: product.stock.toString(),
-        is_auction: product.is_auction || false,
-        min_bid_increment: String(product.min_bid_increment || 1),
-        auction_cooldown_seconds: String(product.auction_cooldown_seconds || 300),
-        auction_ends_at: product.auction_ends_at
-          ? new Date(product.auction_ends_at * 1000).toISOString().slice(0, 16)
-          : "",
-        sendable: product.sendable || false,
-        codesText: (product.codes || []).join("\n"),
-      });
+      setFormData(toForm(product));
     }
   }, [product]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!product) return;
+
+    // Solo se envía lo que el admin ha cambiado: el stock y los códigos pueden
+    // haber variado (canjes) desde que se cargó la página, y reenviarlos los
+    // restauraría.
+    const initial = toForm(product);
+    const changes: Record<string, unknown> = {};
+
+    if (formData.name !== initial.name) changes.name = formData.name;
+    if (formData.description !== initial.description)
+      changes.description = formData.description;
+    if (formData.image !== initial.image) changes.image = formData.image;
+    if (formData.price !== initial.price) changes.price = formData.price;
+    if (formData.stock !== initial.stock) changes.stock = formData.stock;
+    if (formData.is_auction !== initial.is_auction)
+      changes.is_auction = formData.is_auction;
+    if (formData.sendable !== initial.sendable)
+      changes.sendable = formData.sendable;
+
+    if (formData.is_auction) {
+      if (formData.min_bid_increment !== initial.min_bid_increment)
+        changes.min_bid_increment = formData.min_bid_increment;
+      if (formData.auction_cooldown_seconds !== initial.auction_cooldown_seconds)
+        changes.auction_cooldown_seconds = formData.auction_cooldown_seconds;
+      if (formData.auction_ends_at !== initial.auction_ends_at)
+        changes.auction_ends_at = formData.auction_ends_at
+          ? fromDateTimeLocal(formData.auction_ends_at)
+          : null;
+    }
+
+    if (formData.sendable && formData.codesText !== initial.codesText) {
+      changes.codes = formData.codesText
+        .split("\n")
+        .map((c) => c.trim())
+        .filter(Boolean);
+    }
+
+    if (Object.keys(changes).length === 0) {
+      onClose();
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      const codes = formData.sendable
-        ? formData.codesText
-            .split("\n")
-            .map((c) => c.trim())
-            .filter(Boolean)
-        : [];
-
       const response = await fetch(`/api/admin/products/${product.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formData.name,
-          description: formData.description,
-          image: formData.image,
-          price: formData.price,
-          stock: formData.stock,
-          is_auction: formData.is_auction,
-          min_bid_increment: formData.min_bid_increment,
-          auction_cooldown_seconds: formData.auction_cooldown_seconds,
-          auction_ends_at: formData.auction_ends_at
-            ? Math.floor(new Date(formData.auction_ends_at).getTime() / 1000)
-            : null,
-          sendable: formData.sendable,
-          codes,
-        }),
+        body: JSON.stringify(changes),
       });
 
       if (response.ok) {
@@ -111,21 +138,14 @@ export default function EditProductModal({
   };
 
   const handleClose = () => {
-    setFormData({
-      name: "",
-      description: "",
-      image: "",
-      price: "",
-      stock: "",
-      is_auction: false,
-      min_bid_increment: "1",
-      auction_cooldown_seconds: "300",
-      auction_ends_at: "",
-      sendable: false,
-      codesText: "",
-    });
+    setFormData(EMPTY_FORM);
     onClose();
   };
+
+  // Una ronda cerrada o en espera no tiene fecha de fin: solo se exige a una
+  // subasta abierta o recién activada.
+  const endDateRequired =
+    !product?.is_auction || product.auction_status === "in_progress";
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
@@ -258,7 +278,7 @@ export default function EditProductModal({
                   onChange={(e) =>
                     setFormData({ ...formData, auction_ends_at: e.target.value })
                   }
-                  required
+                  required={endDateRequired}
                 />
               </div>
             </>

@@ -1,130 +1,46 @@
-import { getGiveawayById } from "@/app/utils/giveaways";
-import { getUserByDiscordId } from "@/app/utils/users";
-import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
-
 import { z } from "zod";
 
-const bodySchema = z.object({
-  discord_id: z.string(),
-});
+import { buyGiveawayTicketAtomic } from "@/app/utils/points";
+import { pointsErrorResponse } from "@/app/utils/products/pointsErrors";
+import { getUserByDiscordId } from "@/app/utils/users";
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    db: { schema: "mateoz" },
-  }
-);
+const bodySchema = z.object({
+  discord_id: z.string().min(1),
+});
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const resolvedParams = await params;
-  const product_id = resolvedParams.id;
+  const { id } = await params;
+  const giveawayId = Number(id);
+  if (!Number.isInteger(giveawayId) || giveawayId <= 0) {
+    return NextResponse.json({ success: false, error: "INVALID_GIVEAWAY_ID" }, { status: 400 });
+  }
 
-  let body;
+  const parsed = bodySchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ success: false, error: "INVALID_REQUEST_BODY" }, { status: 400 });
+  }
+
   try {
-    body = bodySchema.parse(await request.json());
+    const user = await getUserByDiscordId(parsed.data.discord_id);
+    if (!user) {
+      return NextResponse.json({ success: false, error: "USER_NOT_FOUND" }, { status: 404 });
+    }
+
+    const result = await buyGiveawayTicketAtomic(user.id, giveawayId);
+
+    return NextResponse.json(
+      { success: true, data: { entry_id: result.entry_id, balance: result.balance } },
+      { status: 200 }
+    );
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Invalid request body", details: error },
-        { status: 400 }
-      );
-    } else {
-      return NextResponse.json({ error: "Invalid request" }, { status: 400 });
-    }
+    const response = pointsErrorResponse(error);
+    if (response) return response;
+
+    console.error("Error buying giveaway ticket:", error);
+    return NextResponse.json({ success: false, error: "INTERNAL_SERVER_ERROR" }, { status: 500 });
   }
-
-  const { discord_id } = body;
-
-  const user = await getUserByDiscordId(discord_id);
-
-  if (!user) {
-    return NextResponse.json(
-      { success: false, error: "USER_NOT_FOUND" },
-      { status: 404 }
-    );
-  }
-
-  const actualPoints = user?.actual_points ?? 0;
-
-  if (actualPoints < 0) {
-    return NextResponse.json(
-      { success: false, error: "NOT_ENOUGH_POINTS" },
-      { status: 400 }
-    );
-  }
-
-  const product = await getGiveawayById(parseInt(product_id));
-
-  if (!product) {
-    return NextResponse.json(
-      { success: false, error: "PRODUCT_NOT_FOUND" },
-      { status: 404 }
-    );
-  }
-
-  if (actualPoints < product.cost) {
-    return NextResponse.json(
-      { success: false, error: "NOT_ENOUGH_POINTS" },
-      { status: 400 }
-    );
-  }
-
-  const userKickId = user.kick_id;
-
-  if (!userKickId) {
-    return NextResponse.json(
-      { success: false, error: "USER_KICK_ID_NOT_FOUND" },
-      { status: 404 }
-    );
-  }
-
-  let order;
-  try {
-    const newUsedPoints = user.used_points + product.cost;
-    const { error: userUpdateError } = await supabase
-      .from("users")
-      .update({ used_points: newUsedPoints })
-      .eq("kick_id", userKickId.toString());
-
-    if (userUpdateError) {
-      throw userUpdateError;
-    }
-
-    const { data: inserted, error: entryError } = await supabase
-      .from("giveaways_entries")
-      .insert({
-        user_id: user.id,
-        giveaway_id: product.id,
-      })
-      .select("*");
-
-    if (entryError) {
-      throw entryError;
-    }
-
-    order = inserted?.[0];
-  } catch (error) {
-    console.error("Error creating order:", error);
-    return NextResponse.json(
-      { error: "Failed to create order" },
-      { status: 500 }
-    );
-  }
-
-  // TODO: ¿¿enviar correo??
-
-  return NextResponse.json(
-    {
-      success: true,
-      data: order,
-    },
-    {
-      status: 200,
-    }
-  );
 }

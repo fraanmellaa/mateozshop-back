@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
 import { updateGiveaway, deleteGiveaway } from "@/app/utils/giveaways/admin";
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!(await requireAdmin())) return adminUnauthorized();
+
   try {
     const { id: idParam } = await params;
     const id = parseInt(idParam);
@@ -97,6 +100,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!(await requireAdmin())) return adminUnauthorized();
+
   try {
     const { id: idParam } = await params;
     const id = parseInt(idParam);

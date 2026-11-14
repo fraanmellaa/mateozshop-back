@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ColumnDef } from "@tanstack/react-table";
-import { DecoratedGiveaway } from "../utils/giveaways/admin";
+import type { DecoratedGiveaway } from "../utils/giveaways/admin";
 import { Button } from "@/components/ui/button";
 import {
   ArrowUpDown,
@@ -231,6 +231,8 @@ export default function PageBody({
     },
     {
       accessorKey: "created_at",
+      // `created_at` es una fecha ya formateada: se ordena por el timestamp.
+      sortingFn: (a, b) => a.original.start_at - b.original.start_at,
       header: ({ column }) => {
         return (
           <Button

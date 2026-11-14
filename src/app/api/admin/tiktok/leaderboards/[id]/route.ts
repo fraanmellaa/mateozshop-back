@@ -1,28 +1,59 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
 import {
   deleteTikTokLeaderboard,
   getAdminTikTokLeaderboards,
   setTikTokLeaderboardStatus,
-  TikTokLeaderboardStatus,
   updateTikTokLeaderboard,
 } from "@/app/utils/tiktok/leaderboards";
 import { purgePastLeaderboardsCache } from "@/app/utils/frontendCache";
+
+const VALIDATION_ERRORS = new Set([
+  "LEADERBOARD_TITLE_REQUIRED",
+  "LEADERBOARD_INVALID_DATES",
+  "LEADERBOARD_INVALID_RANGE",
+  "LEADERBOARD_END_IN_PAST",
+  "LEADERBOARD_PRIZES_REQUIRED",
+  "LEADERBOARD_PRIZES_DUPLICATED_POSITION",
+  "LEADERBOARD_OVERLAP_NOT_ALLOWED",
+]);
+
+// El estado actual no admite la operación.
+const CONFLICT_ERRORS = new Set([
+  "LEADERBOARD_LOCKED_FOR_EDIT",
+  "LEADERBOARD_INVALID_TRANSITION",
+]);
+
+function parseId(idParam: string) {
+  const id = Number(idParam);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function invalidId() {
+  return NextResponse.json(
+    { success: false, error: "INVALID_LEADERBOARD_ID" },
+    { status: 400 }
+  );
+}
+
+async function purgeCache() {
+  try {
+    await purgePastLeaderboardsCache();
+  } catch (error) {
+    console.error("Error purgando caché de leaderboards:", error);
+  }
+}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { id: idParam } = await params;
-    const id = Number(idParam);
+  if (!(await requireAdmin())) return adminUnauthorized();
 
-    if (!Number.isInteger(id) || id <= 0) {
-      return NextResponse.json(
-        { success: false, error: "INVALID_LEADERBOARD_ID" },
-        { status: 400 }
-      );
-    }
+  try {
+    const id = parseId((await params).id);
+    if (id === null) return invalidId();
 
     const all = await getAdminTikTokLeaderboards();
     const leaderboard = all.find((item) => item.id === id);
@@ -48,29 +79,20 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!(await requireAdmin())) return adminUnauthorized();
+
   try {
-    const { id: idParam } = await params;
-    const id = Number(idParam);
+    const id = parseId((await params).id);
+    if (id === null) return invalidId();
 
-    if (!Number.isInteger(id) || id <= 0) {
-      return NextResponse.json(
-        { success: false, error: "INVALID_LEADERBOARD_ID" },
-        { status: 400 }
-      );
-    }
-
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
 
     if (body?.action === "set_status") {
       const status = String(body?.status || "");
 
-      if (
-        status !== "scheduled" &&
-        status !== "active" &&
-        status !== "in_review" &&
-        status !== "closed" &&
-        status !== "cancelled"
-      ) {
+      // Lo único que decide el admin: cerrar la revisión o cancelar. El resto
+      // de cambios de estado los hace el cron.
+      if (status !== "closed" && status !== "cancelled") {
         return NextResponse.json(
           { success: false, error: "INVALID_LEADERBOARD_STATUS" },
           { status: 400 }
@@ -79,13 +101,11 @@ export async function PUT(
 
       await setTikTokLeaderboardStatus(
         id,
-        status as TikTokLeaderboardStatus,
-        body?.review_notes ? String(body.review_notes) : undefined
+        status,
+        typeof body?.review_notes === "string" ? body.review_notes : undefined
       );
 
-      if (status === "in_review" || status === "closed" || status === "cancelled") {
-        await purgePastLeaderboardsCache();
-      }
+      await purgeCache();
 
       return NextResponse.json({ success: true });
     }
@@ -102,24 +122,21 @@ export async function PUT(
   } catch (error) {
     const message = error instanceof Error ? error.message : "UNKNOWN_ERROR";
 
-    if (
-      message === "LEADERBOARD_NOT_FOUND" ||
-      message === "LEADERBOARD_LOCKED_FOR_EDIT"
-    ) {
+    if (message === "LEADERBOARD_NOT_FOUND") {
       return NextResponse.json(
         { success: false, error: message },
         { status: 404 }
       );
     }
 
-    if (
-      message === "LEADERBOARD_TITLE_REQUIRED" ||
-      message === "LEADERBOARD_INVALID_DATES" ||
-      message === "LEADERBOARD_INVALID_RANGE" ||
-      message === "LEADERBOARD_PRIZES_REQUIRED" ||
-      message === "LEADERBOARD_PRIZES_DUPLICATED_POSITION" ||
-      message === "LEADERBOARD_OVERLAP_NOT_ALLOWED"
-    ) {
+    if (CONFLICT_ERRORS.has(message)) {
+      return NextResponse.json(
+        { success: false, error: message },
+        { status: 409 }
+      );
+    }
+
+    if (VALIDATION_ERRORS.has(message)) {
       return NextResponse.json(
         { success: false, error: message },
         { status: 400 }
@@ -138,20 +155,24 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { id: idParam } = await params;
-    const id = Number(idParam);
+  if (!(await requireAdmin())) return adminUnauthorized();
 
-    if (!Number.isInteger(id) || id <= 0) {
+  try {
+    const id = parseId((await params).id);
+    if (id === null) return invalidId();
+
+    await deleteTikTokLeaderboard(id);
+    await purgeCache();
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    if (error instanceof Error && error.message === "LEADERBOARD_NOT_FOUND") {
       return NextResponse.json(
-        { success: false, error: "INVALID_LEADERBOARD_ID" },
-        { status: 400 }
+        { success: false, error: "LEADERBOARD_NOT_FOUND" },
+        { status: 404 }
       );
     }
 
-    await deleteTikTokLeaderboard(id);
-    return NextResponse.json({ success: true });
-  } catch (error) {
     console.error("Error deleting TikTok leaderboard:", error);
     return NextResponse.json(
       { success: false, error: "INTERNAL_SERVER_ERROR" },

@@ -1,22 +1,45 @@
-"use server";
+import { randomInt } from "crypto";
 
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { sendWinnerNotificationEmail } from "@/app/utils/email";
 import { publishUserNotification } from "@/app/utils/realtime";
+import { fetchAllRows } from "./fetchAll";
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    db: { schema: "mateoz" },
-  }
-);
+type EntryRow = {
+  user_id: number;
+  user:
+    | {
+        discord_id: string | null;
+        email: string | null;
+        username: string | null;
+        image: string | null;
+        kick_id: string | null;
+        is_banned: boolean | null;
+      }
+    | null;
+};
 
-export const performGiveawayLottery = async (giveawayId: number) => {
+async function bestEffort(label: string, fn: () => Promise<unknown>) {
   try {
+    await fn();
+  } catch (error) {
+    console.error(`[giveaways] ${label} failed:`, error);
+  }
+}
+
+/**
+ * Sortea un sorteo terminado. Es idempotente: el `update` que lo cierra solo
+ * se aplica si sigue abierto y sin ganador, y solo quien lo consigue notifica.
+ */
+export const performGiveawayLottery = async (giveawayId: number) => {
+  const supabase = getSupabaseAdmin();
+
+  try {
+    const now = Math.floor(Date.now() / 1000);
+
     const { data: giveawayRows, error: giveawayError } = await supabase
       .from("giveaways")
-      .select("*")
+      .select("id, title, image, end_at, winner, is_closed, sendable, codes, used_codes, comments")
       .eq("id", giveawayId)
       .limit(1);
 
@@ -28,27 +51,57 @@ export const performGiveawayLottery = async (giveawayId: number) => {
     }
 
     if (giveaway.is_closed) {
-      throw new Error(`El sorteo ${giveawayId} ya esta cerrado`);
+      throw new Error(`El sorteo ${giveawayId} ya está cerrado`);
     }
 
     if (giveaway.winner) {
       throw new Error(`El sorteo ${giveawayId} ya tiene un ganador`);
     }
 
-    const { data: entries, error: entriesError } = await supabase
-      .from("giveaways_entries")
-      .select("user_id, user:users!giveaways_entries_user_id_fkey(discord_id, email, username, image, kick_id)")
-      .eq("giveaway_id", giveawayId);
+    if (giveaway.end_at > now) {
+      throw new Error(`El sorteo ${giveawayId} todavía no ha terminado`);
+    }
 
-    if (entriesError) throw entriesError;
+    const entries = await fetchAllRows<EntryRow>((from, to) =>
+      supabase
+        .from("giveaways_entries")
+        .select(
+          "user_id, user:users!giveaways_entries_user_id_users_id_fk(discord_id, email, username, image, kick_id, is_banned)"
+        )
+        .eq("giveaway_id", giveawayId)
+        .order("id", { ascending: true })
+        .range(from, to) as unknown as PromiseLike<{ data: EntryRow[] | null; error: unknown }>
+    );
 
-    if (!entries || entries.length === 0) {
-      const { error: closeError } = await supabase
+    const normalizedEntries = entries.map((entry) => {
+      const user = Array.isArray(entry.user) ? entry.user[0] : entry.user;
+      return {
+        userId: entry.user_id,
+        discordId: (user?.discord_id ?? null) as string | null,
+        email: (user?.email ?? null) as string | null,
+        username: (user?.username ?? null) as string | null,
+        image: (user?.image ?? null) as string | null,
+        kickId: (user?.kick_id ?? null) as string | null,
+        isBanned: !user || Boolean(user.is_banned),
+      };
+    });
+
+    // Los tickets de usuarios baneados no entran en el sorteo.
+    const eligibleEntries = normalizedEntries.filter((entry) => !entry.isBanned);
+
+    if (eligibleEntries.length === 0) {
+      const { data: closedRows, error: closeError } = await supabase
         .from("giveaways")
-        .update({ winner: null, is_closed: true })
-        .eq("id", giveawayId);
+        .update({ is_closed: true })
+        .eq("id", giveawayId)
+        .is("winner", null)
+        .eq("is_closed", false)
+        .select("id");
 
       if (closeError) throw closeError;
+      if (!closedRows?.length) {
+        throw new Error(`El sorteo ${giveawayId} ya ha sido procesado`);
+      }
 
       return {
         success: true,
@@ -60,71 +113,106 @@ export const performGiveawayLottery = async (giveawayId: number) => {
       };
     }
 
-    const normalizedEntries = entries.map((entry) => {
-      const user = Array.isArray(entry.user) ? entry.user[0] : entry.user;
-      return {
-        userId: entry.user_id,
-        discordId: user?.discord_id as string | null,
-        email: user?.email as string | null,
-        username: user?.username as string | null,
-        image: user?.image as string | null,
-        kickId: user?.kick_id as string | null,
-      };
-    });
+    // Una fila = un ticket: elegir una fila al azar pondera por tickets.
+    const winner = eligibleEntries[randomInt(eligibleEntries.length)];
 
-    const randomIndex = Math.floor(Math.random() * normalizedEntries.length);
-    const winner = normalizedEntries[randomIndex];
+    const codes: string[] = giveaway.codes || [];
+    const usedCodes: string[] = giveaway.used_codes || [];
+    const code = giveaway.sendable && codes.length > 0 ? codes[0] : null;
 
-    const { error: winnerUpdateError } = await supabase
+    const { data: claimedRows, error: winnerUpdateError } = await supabase
       .from("giveaways")
-      .update({ winner: winner.userId, is_closed: true })
-      .eq("id", giveawayId);
+      .update({
+        winner: winner.userId,
+        is_closed: true,
+        ...(code ? { codes: codes.slice(1), used_codes: [...usedCodes, code] } : {}),
+      })
+      .eq("id", giveawayId)
+      .is("winner", null)
+      .eq("is_closed", false)
+      .select("id");
 
     if (winnerUpdateError) throw winnerUpdateError;
+    if (!claimedRows?.length) {
+      // Otro proceso lo ha sorteado a la vez: no se notifica nada.
+      throw new Error(`El sorteo ${giveawayId} ya ha sido procesado`);
+    }
 
+    // El ganador ya está fijado: lo que sigue no puede hacer fallar el sorteo.
     const uniqueParticipants = Array.from(
       new Map(normalizedEntries.map((entry) => [entry.userId, entry])).values()
     );
 
+    let emailSent = false;
+    if (winner.email) {
+      await bestEffort(`email winner ${giveawayId}`, async () => {
+        emailSent = await sendWinnerNotificationEmail({
+          to: winner.email as string,
+          subject: `Has ganado el sorteo ${giveaway.title}`,
+          title: "Has ganado un sorteo",
+          intro: `Enhorabuena, has sido seleccionado como ganador de "${giveaway.title}".`,
+          details: [`Sorteo: ${giveaway.title}`, ...(code ? [`Código: ${code}`] : [])],
+          ctaLabel: "Ver sorteo",
+          ctaUrl: `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://mateozshop.com"}/sorteos/${giveawayId}`,
+        });
+      });
+    }
+
+    if (code || !emailSent) {
+      // Queda anotado en los comentarios internos para que el admin pueda
+      // reenviar el premio si el email no llegó.
+      const message = [
+        code ? `Código entregado al ganador: ${code}.` : null,
+        emailSent
+          ? "Email enviado al ganador."
+          : "No se pudo enviar el email al ganador: hay que avisarle a mano.",
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      const { error: commentError } = await supabase
+        .from("giveaways")
+        .update({
+          comments: [...(giveaway.comments || []), { created_at: now, message }],
+        })
+        .eq("id", giveawayId);
+      if (commentError) {
+        console.error(`[giveaways] ${giveawayId}: could not store delivery note`, commentError);
+      }
+    }
+
     for (const participant of uniqueParticipants) {
-      if (!participant.discordId) continue;
+      if (!participant.discordId || participant.isBanned) continue;
+      const discordId = participant.discordId;
 
       if (participant.userId === winner.userId) {
-        await publishUserNotification({
-          discordId: participant.discordId,
-          type: "giveaway_won",
-          title: "Has ganado el sorteo",
-          body: `Enhorabuena, has ganado \"${giveaway.title}\".`,
-          giveawayId,
-          giveawayTitle: giveaway.title,
-          giveawayImage: giveaway.image,
-          targetUrl: `/sorteos/${giveawayId}`,
-        });
-
-        if (participant.email) {
-          await sendWinnerNotificationEmail({
-            to: participant.email,
-            subject: `Has ganado el sorteo ${giveaway.title}`,
-            title: "Has ganado un sorteo",
-            intro: `Enhorabuena, has sido seleccionado como ganador de \"${giveaway.title}\".`,
-            details: [`Sorteo: ${giveaway.title}`],
-            ctaLabel: "Ver sorteo",
-            ctaUrl: `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://mateozshop.com"}/sorteos/${giveawayId}`,
-          });
-        }
+        await bestEffort(`notify winner ${giveawayId}`, () =>
+          publishUserNotification({
+            discordId,
+            type: "giveaway_won",
+            title: "Has ganado el sorteo",
+            body: `Enhorabuena, has ganado "${giveaway.title}".`,
+            giveawayId,
+            giveawayTitle: giveaway.title,
+            giveawayImage: giveaway.image,
+            targetUrl: `/sorteos/${giveawayId}`,
+          })
+        );
         continue;
       }
 
-      await publishUserNotification({
-        discordId: participant.discordId,
-        type: "giveaway_finished",
-        title: "Sorteo finalizado",
-        body: `El sorteo \"${giveaway.title}\" ha terminado.`,
-        giveawayId,
-        giveawayTitle: giveaway.title,
-        giveawayImage: giveaway.image,
-        targetUrl: "/mi-cuenta/sorteos",
-      });
+      await bestEffort(`notify participant ${giveawayId}`, () =>
+        publishUserNotification({
+          discordId,
+          type: "giveaway_finished",
+          title: "Sorteo finalizado",
+          body: `El sorteo "${giveaway.title}" ha terminado.`,
+          giveawayId,
+          giveawayTitle: giveaway.title,
+          giveawayImage: giveaway.image,
+          targetUrl: "/mi-cuenta/sorteos",
+        })
+      );
     }
 
     return {
@@ -137,7 +225,7 @@ export const performGiveawayLottery = async (giveawayId: number) => {
         kickId: winner.kickId,
       },
       notifiedParticipants: uniqueParticipants.length,
-      totalParticipants: normalizedEntries.length,
+      totalParticipants: eligibleEntries.length,
     };
   } catch (error) {
     console.error(`Error al realizar sorteo ${giveawayId}:`, error);
@@ -150,62 +238,21 @@ export const performGiveawayLottery = async (giveawayId: number) => {
 };
 
 export const processFinishedGiveaways = async () => {
-  try {
-    const now = Math.floor(Date.now() / 1000);
+  const now = Math.floor(Date.now() / 1000);
 
-    const { data: finishedGiveaways, error } = await supabase
-      .from("giveaways")
-      .select("id, title, end_at, winner, is_closed")
-      .lte("end_at", now)
-      .is("winner", null)
-      .eq("is_closed", false);
+  const { data: finishedGiveaways, error } = await getSupabaseAdmin()
+    .from("giveaways")
+    .select("id")
+    .lte("end_at", now)
+    .is("winner", null)
+    .eq("is_closed", false);
 
-    if (error) throw error;
+  if (error) throw error;
 
-    if (!finishedGiveaways || finishedGiveaways.length === 0) {
-      return [];
-    }
-
-    const results = [];
-    for (const giveaway of finishedGiveaways) {
-      const result = await performGiveawayLottery(giveaway.id);
-      results.push(result);
-    }
-
-    return results;
-  } catch (error) {
-    console.error("Error al procesar sorteos finalizados:", error);
-    throw error;
+  const results = [];
+  for (const giveaway of finishedGiveaways || []) {
+    results.push(await performGiveawayLottery(giveaway.id));
   }
-};
 
-export const getGiveawayStats = async () => {
-  try {
-    const now = Math.floor(Date.now() / 1000);
-
-    const { data: stats, error } = await supabase.from("giveaways").select("*");
-    if (error) throw error;
-
-    const active = (stats || []).filter((g) => g.start_at <= now && g.end_at > now);
-    const finished = (stats || []).filter(
-      (g) => g.end_at <= now && (Boolean(g.winner) || g.is_closed)
-    );
-    const pending = (stats || []).filter((g) => g.end_at <= now && !g.winner && !g.is_closed);
-    const upcoming = (stats || []).filter((g) => g.start_at > now);
-
-    return {
-      total: (stats || []).length,
-      active: active.length,
-      finished: finished.length,
-      pending: pending.length,
-      upcoming: upcoming.length,
-      details: {
-        active: active.map((g) => ({ id: g.id, title: g.title, end_at: g.end_at })),
-        pending: pending.map((g) => ({ id: g.id, title: g.title, end_at: g.end_at })),
-      },
-    };
-  } catch (error) {
-    console.error("Error al obtener estadísticas:", error);
-    throw error;
-  }
+  return results;
 };

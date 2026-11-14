@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getPublicTikTokLeaderboardById } from "@/app/utils/tiktok/leaderboards";
-import { mockTikTokLeaderboardDetail } from "../mock";
 
 export async function GET(
   request: NextRequest,
@@ -18,16 +17,6 @@ export async function GET(
           error: "INVALID_ID",
         },
         { status: 400 }
-      );
-    }
-
-    if (id === mockTikTokLeaderboardDetail.id) {
-      return NextResponse.json(
-        {
-          success: true,
-          result: mockTikTokLeaderboardDetail,
-        },
-        { status: 200 }
       );
     }
 

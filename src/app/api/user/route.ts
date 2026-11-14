@@ -1,30 +1,22 @@
-import { getUserByDiscordId } from "@/app/utils/users";
+import { getUserByDiscordId, toPublicUser } from "@/app/utils/users";
 import { NextResponse } from "next/server";
 
 import { z } from "zod";
 
 const bodySchema = z.object({
-  discord_id: z.string(),
+  discord_id: z.string().min(1).max(100),
 });
 
 export async function POST(request: Request) {
-  let body;
-  try {
-    body = bodySchema.parse(await request.json());
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Invalid request body", details: error },
-        { status: 400 }
-      );
-    } else {
-      return NextResponse.json({ error: "Invalid request" }, { status: 400 });
-    }
+  const parsed = bodySchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json(
+      { success: false, error: "INVALID_REQUEST_BODY" },
+      { status: 400 }
+    );
   }
 
-  const { discord_id } = body;
-
-  const user = await getUserByDiscordId(discord_id.toString());
+  const user = await getUserByDiscordId(parsed.data.discord_id);
 
   if (!user) {
     return NextResponse.json(
@@ -33,14 +25,5 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json(
-    {
-      success: true,
-      message: "User retrieved successfully",
-      data: user,
-    },
-    {
-      status: 200,
-    }
-  );
+  return NextResponse.json({ success: true, data: toPublicUser(user) });
 }

@@ -16,8 +16,11 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import ChangeOrderStatusModal from "./ChangeOrderStatusModal";
 import SendEmailModal from "./SendEmailModal";
-import { updateOrderStatus } from "@/app/utils/orders/actions";
-import { sendOrderEmail } from "@/app/utils/orders/actions";
+import {
+  resendOrderCode,
+  sendOrderEmail,
+  updateOrderStatus,
+} from "@/app/utils/orders/actions";
 import { toast } from "sonner";
 
 interface OrderDetailProps {
@@ -29,13 +32,23 @@ export default function OrderDetail({ order }: OrderDetailProps) {
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
   const [currentOrder, setCurrentOrder] = useState(order);
+  const [isResendingCode, setIsResendingCode] = useState(false);
 
   const handleStatusChange = async (newStatus: number) => {
     try {
       const result = await updateOrderStatus(currentOrder.id, newStatus);
       if (result.success) {
         setCurrentOrder({ ...currentOrder, status: newStatus });
-        toast.success("Estado del pedido actualizado correctamente");
+        if ("warning" in result && result.warning) {
+          toast.warning(result.warning);
+        } else {
+          toast.success(
+            newStatus === 2
+              ? "Pedido cancelado y puntos devueltos al usuario"
+              : "Estado del pedido actualizado correctamente"
+          );
+        }
+        router.refresh();
       } else {
         toast.error(result.error || "Error al actualizar el estado");
       }
@@ -46,11 +59,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
 
   const handleSendEmail = async (subject: string, message: string) => {
     try {
-      const result = await sendOrderEmail(
-        currentOrder.user.email,
-        subject,
-        message
-      );
+      const result = await sendOrderEmail(currentOrder.id, subject, message);
       if (result.success) {
         toast.success("Email enviado correctamente");
       } else {
@@ -58,6 +67,23 @@ export default function OrderDetail({ order }: OrderDetailProps) {
       }
     } catch {
       toast.error("Error al enviar el email");
+    }
+  };
+
+  const handleResendCode = async () => {
+    setIsResendingCode(true);
+    try {
+      const result = await resendOrderCode(currentOrder.id);
+      if (result.success) {
+        setCurrentOrder({ ...currentOrder, code_email_sent: true });
+        toast.success("Código reenviado correctamente");
+      } else {
+        toast.error(result.error || "Error al reenviar el código");
+      }
+    } catch {
+      toast.error("Error al reenviar el código");
+    } finally {
+      setIsResendingCode(false);
     }
   };
 
@@ -314,6 +340,43 @@ export default function OrderDetail({ order }: OrderDetailProps) {
         </div>
       </div>
 
+      {/* Código entregado */}
+      {currentOrder.delivered_code && (
+        <div className="bg-card rounded-lg border border-border shadow-sm p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Mail className="h-5 w-5 text-muted-foreground" />
+            <h2 className="text-lg font-semibold text-foreground">
+              Código entregado
+            </h2>
+          </div>
+
+          <p className="text-lg font-mono text-foreground break-all">
+            {currentOrder.delivered_code}
+          </p>
+
+          {currentOrder.code_email_sent === false && (
+            <div className="mt-4 p-3 bg-red-500/20 rounded-md">
+              <p className="text-sm text-red-300">
+                El email con el código no se pudo enviar. Reenvíalo para que el
+                usuario lo reciba.
+              </p>
+            </div>
+          )}
+
+          <div className="mt-4">
+            <Button
+              variant="outline"
+              onClick={handleResendCode}
+              disabled={isResendingCode}
+              className="flex items-center gap-2"
+            >
+              <Mail className="h-4 w-4" />
+              {isResendingCode ? "Enviando..." : "Reenviar código por email"}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Acciones de Administrador */}
       <div className="bg-card rounded-lg border border-border shadow-sm p-6">
         <div className="flex items-center gap-2 mb-4">
@@ -328,6 +391,12 @@ export default function OrderDetail({ order }: OrderDetailProps) {
             onClick={() => setIsStatusModalOpen(true)}
             variant="outline"
             className="flex items-center gap-2 h-12"
+            disabled={currentOrder.status === 2}
+            title={
+              currentOrder.status === 2
+                ? "Un pedido cancelado no se puede reabrir"
+                : undefined
+            }
           >
             <Settings className="h-4 w-4" />
             Cambiar Estado del Pedido
@@ -370,7 +439,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
             </div>
           </div>
 
-          {currentOrder.status >= 1 && (
+          {currentOrder.status === 1 && (
             <div className="flex items-center gap-3 p-3 bg-green-500/20 rounded-md">
               <div className="w-2 h-2 bg-green-500 rounded-full"></div>
               <div>
@@ -388,7 +457,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
               <div>
                 <p className="font-medium text-foreground">Pedido cancelado</p>
                 <p className="text-sm text-muted-foreground">
-                  Estado actualizado
+                  Puntos devueltos al usuario
                 </p>
               </div>
             </div>

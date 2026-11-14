@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    db: { schema: "mateoz" },
-  }
-);
 
 export async function GET(
   request: NextRequest,
@@ -17,12 +10,14 @@ export async function GET(
     const { id } = await params;
     const productId = Number(id);
 
-    if (!Number.isFinite(productId)) {
+    if (!Number.isInteger(productId) || productId <= 0) {
       return NextResponse.json(
         { success: false, error: "INVALID_PRODUCT_ID" },
         { status: 400 }
       );
     }
+
+    const supabase = getSupabaseAdmin();
 
     const { data: productRows, error: productError } = await supabase
       .from("products")
@@ -34,7 +29,7 @@ export async function GET(
       throw productError;
     }
 
-    const product = productRows[0];
+    const product = productRows?.[0];
 
     if (!product) {
       return NextResponse.json(

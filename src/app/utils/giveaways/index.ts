@@ -1,90 +1,33 @@
-"use server";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { fetchAllRows } from "./fetchAll";
 
-import { createClient } from "@supabase/supabase-js";
-import { sendCustomEmail } from "@/app/utils/email";
+// Columnas de las rutas públicas: nunca `codes`, `used_codes` ni `comments`.
+const PUBLIC_GIVEAWAY_COLUMNS = "id, cost, title, image, start_at, end_at, winner, is_closed";
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    db: { schema: "mateoz" },
-  }
-);
-
-export const getGiveaways = async () => {
-  const now = Math.floor(Date.now() / 1000);
-
-  const { data: giveawaysList, error } = await supabase.from("giveaways").select("*");
-  if (error) throw error;
-
-  const giveawaysData = await Promise.all(
-    (giveawaysList || []).map(async (giveaway) => {
-      const { data: entriesRows } = await supabase
-        .from("giveaways_entries")
-        .select("user_id, user:users!giveaways_entries_user_id_fkey(username, image)")
-        .eq("giveaway_id", giveaway.id);
-
-      const grouped = new Map<number, { userId: number; tickets: number; name: string; profileImage: string }>();
-      for (const entry of entriesRows || []) {
-        const user = Array.isArray(entry.user) ? entry.user[0] : entry.user;
-        const current = grouped.get(entry.user_id);
-        if (current) {
-          current.tickets += 1;
-        } else {
-          grouped.set(entry.user_id, {
-            userId: entry.user_id,
-            tickets: 1,
-            name: user?.username || "",
-            profileImage: user?.image || "",
-          });
-        }
-      }
-
-      let winners: { id: number; name: string; profileImage: string }[] = [];
-      if (giveaway.end_at < now && giveaway.winner) {
-        const winnerIds = Array.isArray(giveaway.winner) ? giveaway.winner : [giveaway.winner];
-        const { data: winnerRows } = await supabase
-          .from("users")
-          .select("id, username, image")
-          .in("id", winnerIds);
-
-        winners = (winnerRows || []).map((w) => ({
-          id: w.id,
-          name: w.username,
-          profileImage: w.image,
-        }));
-      }
-
-      return {
-        ...giveaway,
-        entries: Array.from(grouped.values()),
-        winners,
-      };
-    })
-  );
-
-  return {
-    actual: giveawaysData.filter((g) => g.start_at < now && g.end_at > now),
-    past: giveawaysData.filter((g) => g.end_at < now),
-  };
+type EntryRow = {
+  user_id: number;
+  user: { username: string | null; image: string | null; kick_id: string | null } | null;
 };
 
-export const getGiveawayById = async (id: number) => {
-  const { data: giveawayRows, error } = await supabase.from("giveaways").select("*").eq("id", id).limit(1);
-  if (error) throw error;
+/** Participantes de un sorteo agrupados por usuario, con su número de tickets. */
+export async function getGiveawayEntries(giveawayId: number) {
+  const supabase = getSupabaseAdmin();
 
-  const giveaway = giveawayRows?.[0];
-  if (!giveaway) return null;
+  const entries = await fetchAllRows<EntryRow>((from, to) =>
+    supabase
+      .from("giveaways_entries")
+      .select("user_id, user:users!giveaways_entries_user_id_users_id_fk(username, image, kick_id)")
+      .eq("giveaway_id", giveawayId)
+      .order("id", { ascending: true })
+      .range(from, to) as unknown as PromiseLike<{ data: EntryRow[] | null; error: unknown }>
+  );
 
-  const now = Math.floor(Date.now() / 1000);
+  const grouped = new Map<
+    number,
+    { userId: number; tickets: number; name: string; profileImage: string; kickId: string | null }
+  >();
 
-  const { data: entriesRows } = await supabase
-    .from("giveaways_entries")
-    .select("user_id, user:users!giveaways_entries_user_id_fkey(username, image, kick_id)")
-    .eq("giveaway_id", giveaway.id);
-
-  const grouped = new Map<number, { userId: number; tickets: number; name: string; profileImage: string; kickId: string | null }>();
-  for (const entry of entriesRows || []) {
+  for (const entry of entries) {
     const user = Array.isArray(entry.user) ? entry.user[0] : entry.user;
     const current = grouped.get(entry.user_id);
     if (current) {
@@ -100,43 +43,92 @@ export const getGiveawayById = async (id: number) => {
     }
   }
 
-  let winners: { id: number; name: string; profileImage: string; kickId: string | null }[] = [];
-  if (giveaway.end_at < now && giveaway.winner) {
-    const winnerIds = Array.isArray(giveaway.winner) ? giveaway.winner : [giveaway.winner];
-    const { data: winnerRows } = await supabase
-      .from("users")
-      .select("id, username, image, kick_id")
-      .in("id", winnerIds);
+  return Array.from(grouped.values());
+}
 
-    winners = (winnerRows || []).map((w) => ({
-      id: w.id,
-      name: w.username,
-      profileImage: w.image,
-      kickId: w.kick_id,
-    }));
-  }
+export async function getGiveawayWinners(giveaway: { end_at: number; winner: number | null }) {
+  const now = Math.floor(Date.now() / 1000);
+  if (giveaway.end_at >= now || !giveaway.winner) return [];
+
+  const { data: winnerRows, error } = await getSupabaseAdmin()
+    .from("users")
+    .select("id, username, image, kick_id")
+    .eq("id", giveaway.winner);
+  if (error) throw error;
+
+  return (winnerRows || []).map((w) => ({
+    id: w.id as number,
+    name: w.username as string,
+    profileImage: w.image as string,
+    kickId: (w.kick_id ?? null) as string | null,
+  }));
+}
+
+/** Listado para la web pública. */
+export const getGiveaways = async () => {
+  const now = Math.floor(Date.now() / 1000);
+
+  const { data: giveawaysList, error } = await getSupabaseAdmin()
+    .from("giveaways")
+    .select(PUBLIC_GIVEAWAY_COLUMNS)
+    .order("id", { ascending: true });
+  if (error) throw error;
+
+  const giveawaysData = await Promise.all(
+    (giveawaysList || []).map(async (giveaway) => ({
+      ...giveaway,
+      entries: await getGiveawayEntries(giveaway.id),
+      winners: await getGiveawayWinners(giveaway),
+    }))
+  );
+
+  return {
+    actual: giveawaysData.filter((g) => g.start_at < now && g.end_at > now),
+    past: giveawaysData.filter((g) => g.end_at < now),
+  };
+};
+
+/** Detalle para la web pública. */
+export const getGiveawayById = async (id: number) => {
+  const { data: giveawayRows, error } = await getSupabaseAdmin()
+    .from("giveaways")
+    .select(PUBLIC_GIVEAWAY_COLUMNS)
+    .eq("id", id)
+    .limit(1);
+  if (error) throw error;
+
+  const giveaway = giveawayRows?.[0];
+  if (!giveaway) return null;
 
   return {
     ...giveaway,
-    entries: Array.from(grouped.values()),
-    winners,
-    comments: (giveaway.comments || []).sort(
-      (a: { created_at: number }, b: { created_at: number }) => b.created_at - a.created_at
-    ),
+    entries: await getGiveawayEntries(giveaway.id),
+    winners: await getGiveawayWinners(giveaway),
   };
 };
 
 export const getUserGiveaways = async (userId: number) => {
   const now = Math.floor(Date.now() / 1000);
+  const supabase = getSupabaseAdmin();
 
-  const { data: entries, error } = await supabase
-    .from("giveaways_entries")
-    .select("giveaway_id")
-    .eq("user_id", userId);
+  const entries = await fetchAllRows<{ giveaway_id: number }>((from, to) =>
+    supabase
+      .from("giveaways_entries")
+      .select("giveaway_id")
+      .eq("user_id", userId)
+      .order("id", { ascending: true })
+      .range(from, to)
+  );
 
-  if (error) throw error;
+  const userTicketsByGiveaway = new Map<number, number>();
+  for (const entry of entries) {
+    userTicketsByGiveaway.set(
+      entry.giveaway_id,
+      (userTicketsByGiveaway.get(entry.giveaway_id) || 0) + 1
+    );
+  }
 
-  const ids = Array.from(new Set((entries || []).map((e) => e.giveaway_id)));
+  const ids = Array.from(userTicketsByGiveaway.keys());
   if (ids.length === 0) return [];
 
   const { data: giveaways, error: giveawaysError } = await supabase
@@ -146,17 +138,22 @@ export const getUserGiveaways = async (userId: number) => {
 
   if (giveawaysError) throw giveawaysError;
 
-  const ticketCountByGiveaway = new Map<number, number>();
-  for (const entry of entries || []) {
-    ticketCountByGiveaway.set(
-      entry.giveaway_id,
-      (ticketCountByGiveaway.get(entry.giveaway_id) || 0) + 1
-    );
-  }
+  // Total de tickets de cada sorteo, contando los de todos los usuarios.
+  const totalTicketsByGiveaway = new Map<number, number>();
+  await Promise.all(
+    ids.map(async (giveawayId) => {
+      const { count, error } = await supabase
+        .from("giveaways_entries")
+        .select("id", { count: "exact", head: true })
+        .eq("giveaway_id", giveawayId);
+      if (error) throw error;
+      totalTicketsByGiveaway.set(giveawayId, count ?? 0);
+    })
+  );
 
   return (giveaways || []).map((giveaway) => {
-    const userTickets = ticketCountByGiveaway.get(giveaway.id) || 0;
-    const totalTickets = (entries || []).filter((e) => e.giveaway_id === giveaway.id).length;
+    const userTickets = userTicketsByGiveaway.get(giveaway.id) || 0;
+    const totalTickets = totalTicketsByGiveaway.get(giveaway.id) || 0;
 
     let status: string;
     let isWinner = false;
@@ -185,66 +182,4 @@ export const getUserGiveaways = async (userId: number) => {
       created_at: new Date(giveaway.start_at * 1000).toISOString(),
     };
   });
-};
-
-export const addGiveawayComment = async (id: number, message: string) => {
-  const { data: giveawayRows, error } = await supabase.from("giveaways").select("comments").eq("id", id).limit(1);
-  if (error) throw error;
-
-  const giveaway = giveawayRows?.[0];
-  if (!giveaway) throw new Error("Sorteo no encontrado");
-
-  const currentComments = giveaway.comments || [];
-  const newComment = {
-    created_at: Math.floor(Date.now() / 1000),
-    message,
-  };
-
-  const { error: updateError } = await supabase
-    .from("giveaways")
-    .update({ comments: [...currentComments, newComment] })
-    .eq("id", id);
-
-  if (updateError) throw updateError;
-
-  return { success: true, comment: newComment };
-};
-
-export const sendWinnerEmail = async (
-  giveawayId: number,
-  winnerId: number,
-  customSubject?: string,
-  customMessage?: string
-) => {
-  const { data: giveawayRows, error } = await supabase
-    .from("giveaways")
-    .select("title, image")
-    .eq("id", giveawayId)
-    .limit(1);
-
-  if (error) throw error;
-
-  const giveaway = giveawayRows?.[0];
-  if (!giveaway) throw new Error("Sorteo no encontrado");
-
-  const { data: winnerRows, error: winnerError } = await supabase
-    .from("users")
-    .select("email, username")
-    .eq("id", winnerId)
-    .limit(1);
-
-  if (winnerError) throw winnerError;
-
-  const winner = winnerRows?.[0];
-  if (!winner) throw new Error("Ganador no encontrado");
-
-  const defaultMessage = `¡Enhorabuena! Has sido seleccionado como ganador de nuestro sorteo.
-Nuestro equipo se pondrá en contacto contigo pronto para coordinar la entrega del premio.`;
-
-  const message = customMessage || defaultMessage;
-  const subject = customSubject || `¡Felicidades! Has ganado: ${giveaway.title}`;
-
-  await sendCustomEmail(winner.email, subject, message);
-
-  return { success: true };
 };

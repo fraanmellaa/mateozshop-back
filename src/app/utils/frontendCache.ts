@@ -2,6 +2,7 @@ const FRONT_CACHE_TAGS = {
   pastLeaderboards: "past-leaderboards-list",
   pastAuctions: "past-auctions-list",
   pastGiveaways: "past-giveaways-list",
+  bonuses: "bonuses-list",
 } as const;
 
 export async function purgeFrontendCacheByTags(tags: string[]) {
@@ -27,15 +28,26 @@ export async function purgeFrontendCacheByTags(tags: string[]) {
 
   const url = new URL("/api/cache/purge", frontendBaseUrl);
 
-  const response = await fetch(url.toString(), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${purgeSecret}`,
-    },
-    body: JSON.stringify({ tags: uniqueTags }),
-    cache: "no-store",
-  });
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${purgeSecret}`,
+      },
+      body: JSON.stringify({ tags: uniqueTags }),
+      cache: "no-store",
+    });
+  } catch (error) {
+    // La purga es accesoria: no debe tumbar el cron que la lanza.
+    console.error("Frontend cache purge failed:", error);
+    return {
+      success: false,
+      skipped: false,
+      reason: "FRONTEND_PURGE_UNREACHABLE",
+    };
+  }
 
   const payload = await response.json().catch(() => null);
 
@@ -65,4 +77,8 @@ export async function purgePastGiveawaysCache() {
 
 export async function purgePastLeaderboardsCache() {
   return purgeFrontendCacheByTags([FRONT_CACHE_TAGS.pastLeaderboards]);
+}
+
+export async function purgeBonusesCache() {
+  return purgeFrontendCacheByTags([FRONT_CACHE_TAGS.bonuses]);
 }

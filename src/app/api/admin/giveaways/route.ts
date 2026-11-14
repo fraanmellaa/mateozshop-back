@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
 import { getGiveaways, createGiveaway } from "@/app/utils/giveaways/admin";
 
 export async function GET() {
+  if (!(await requireAdmin())) return adminUnauthorized();
+
   try {
     const giveaways = await getGiveaways();
     return NextResponse.json(giveaways);
@@ -15,6 +18,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  if (!(await requireAdmin())) return adminUnauthorized();
+
   try {
     const body = await request.json();
     const { title, image, cost, start_at, end_at, sendable, codes } = body;
@@ -53,6 +58,10 @@ export async function POST(request: NextRequest) {
       cost: parseInt(cost),
       start_at: parseInt(start_at),
       end_at: parseInt(end_at),
+      sendable: Boolean(sendable),
+      codes: sendable
+        ? codes.map((code: unknown) => String(code).trim()).filter(Boolean)
+        : [],
     });
 
     return NextResponse.json(giveaway, { status: 201 });

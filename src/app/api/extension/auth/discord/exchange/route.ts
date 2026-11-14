@@ -1,21 +1,18 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { signExtensionToken, validateExtensionKey } from "@/app/utils/extensionAuth";
+import { extensionError, signExtensionToken } from "@/app/utils/extensionAuth";
+import { extensionOk } from "@/app/utils/games/http";
 import { createUser, getUserByDiscordId } from "@/app/utils/users";
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    db: { schema: "mateoz" },
-  }
-);
+import { requireEnv } from "@/lib/env";
 
 const bodySchema = z.object({
-  code: z.string().min(1),
-  redirectUri: z.string().url(),
+  code: z.string().min(1).max(512),
+  // Solo la URL de retorno de `chrome.identity.launchWebAuthFlow`.
+  redirectUri: z
+    .string()
+    .max(200)
+    .regex(/^https:\/\/[a-p]{32}\.chromiumapp\.org\//),
 });
 
 type DiscordUser = {
@@ -26,6 +23,13 @@ type DiscordUser = {
   email?: string | null;
 };
 
+/** Fallo del login con Discord atribuible al usuario o a Discord, con código público. */
+class DiscordAuthError extends Error {
+  constructor(public code: string, public status: number) {
+    super(code);
+  }
+}
+
 function buildDiscordAvatarUrl(discordUser: DiscordUser) {
   if (discordUser.avatar) {
     return `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`;
@@ -34,16 +38,9 @@ function buildDiscordAvatarUrl(discordUser: DiscordUser) {
 }
 
 async function exchangeCodeForToken(code: string, redirectUri: string) {
-  const clientId = process.env.DISCORD_CLIENT_ID;
-  const clientSecret = process.env.DISCORD_CLIENT_SECRET;
-
-  if (!clientId || !clientSecret) {
-    throw new Error("DISCORD_OAUTH_NOT_CONFIGURED");
-  }
-
   const params = new URLSearchParams({
-    client_id: clientId,
-    client_secret: clientSecret,
+    client_id: requireEnv("DISCORD_CLIENT_ID"),
+    client_secret: requireEnv("DISCORD_CLIENT_SECRET"),
     grant_type: "authorization_code",
     code,
     redirect_uri: redirectUri,
@@ -51,136 +48,76 @@ async function exchangeCodeForToken(code: string, redirectUri: string) {
 
   const tokenRes = await fetch("https://discord.com/api/oauth2/token", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params,
+    signal: AbortSignal.timeout(10_000),
   });
 
-  if (!tokenRes.ok) {
-    throw new Error("DISCORD_TOKEN_EXCHANGE_FAILED");
-  }
+  if (!tokenRes.ok) throw new DiscordAuthError("DISCORD_AUTH_FAILED", 400);
 
   const tokenJson = (await tokenRes.json()) as { access_token?: string };
-  if (!tokenJson.access_token) {
-    throw new Error("DISCORD_TOKEN_MISSING");
-  }
+  if (!tokenJson.access_token) throw new DiscordAuthError("DISCORD_AUTH_FAILED", 400);
 
   return tokenJson.access_token;
 }
 
 async function fetchDiscordMe(accessToken: string) {
   const meRes = await fetch("https://discord.com/api/users/@me", {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(10_000),
   });
 
-  if (!meRes.ok) {
-    throw new Error("DISCORD_ME_FAILED");
-  }
+  if (!meRes.ok) throw new DiscordAuthError("DISCORD_AUTH_FAILED", 502);
 
   const me = (await meRes.json()) as DiscordUser;
-  if (!me.id || !me.username) {
-    throw new Error("DISCORD_ME_INVALID");
-  }
-
-  if (!me.email) {
-    throw new Error("DISCORD_EMAIL_REQUIRED");
-  }
+  if (!me.id || !me.username) throw new DiscordAuthError("DISCORD_AUTH_FAILED", 502);
+  if (!me.email) throw new DiscordAuthError("DISCORD_EMAIL_REQUIRED", 400);
 
   return me;
 }
 
+/** Crea el usuario si no existe o refresca su perfil. No toca puntos. */
 async function upsertUserFromDiscord(me: DiscordUser) {
-  const displayName = me.global_name || me.username;
-  const avatar = buildDiscordAvatarUrl(me);
+  const username = me.global_name || me.username;
+  const image = buildDiscordAvatarUrl(me);
+  const email = me.email as string;
 
-  let user = await getUserByDiscordId(me.id);
-
-  if (!user) {
-    await createUser({
-      name: displayName,
-      user_id: me.id,
-      profile_picture: avatar,
-      email: me.email || `${me.id}@discord.local`,
-    });
-
-    user = await getUserByDiscordId(me.id);
-  } else {
-    const { data: updated, error } = await supabase
-      .from("users")
-      .update({
-        username: displayName,
-        image: avatar,
-        email: me.email || user.email,
-      })
-      .eq("discord_id", me.id)
-      .select("*");
-
-    if (error) {
-      throw error;
+  // createUser da de alta o actualiza el perfil y resuelve los choques de
+  // `username` (UNIQUE) sin fallar; el email de un usuario existente no se toca.
+  try {
+    await createUser({ name: username, user_id: me.id, profile_picture: image, email });
+  } catch (error) {
+    if (error instanceof Error && error.message === "EMAIL_ALREADY_REGISTERED") {
+      throw new DiscordAuthError("EMAIL_ALREADY_REGISTERED", 409);
     }
-
-    if (updated.length > 0) {
-      const row = updated[0];
-      user = {
-        ...row,
-        actual_points: row.total_points - row.used_points,
-        created_at: new Date(row.created_at * 1000).toISOString(),
-      };
-    }
+    throw error;
   }
 
-  return user;
+  return getUserByDiscordId(me.id);
 }
 
 export async function POST(request: NextRequest) {
-  const keyError = validateExtensionKey(request);
-  if (keyError) return keyError;
-
-  let body;
-  try {
-    body = bodySchema.parse(await request.json());
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "INVALID_REQUEST_BODY", details: error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    return NextResponse.json({ error: "INVALID_REQUEST_BODY" }, { status: 400 });
-  }
+  const parsed = bodySchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return extensionError("INVALID_REQUEST_BODY", 400);
 
   try {
-    const accessToken = await exchangeCodeForToken(body.code, body.redirectUri);
+    const accessToken = await exchangeCodeForToken(parsed.data.code, parsed.data.redirectUri);
     const discordMe = await fetchDiscordMe(accessToken);
     const user = await upsertUserFromDiscord(discordMe);
+    if (!user) return extensionError("INTERNAL_SERVER_ERROR", 500);
 
-    if (!user) {
-      return NextResponse.json({ error: "USER_UPSERT_FAILED" }, { status: 500 });
-    }
-
-    const extensionToken = await signExtensionToken(discordMe.id);
-
-    return NextResponse.json(
-      {
-        success: true,
-        data: {
-          token: extensionToken,
-          user: {
-            discord_id: user.discord_id,
-            username: user.username,
-            image: user.image,
-            points: user.actual_points,
-          },
-        },
+    return extensionOk({
+      token: await signExtensionToken(discordMe.id),
+      user: {
+        discord_id: user.discord_id,
+        username: user.username,
+        image: user.image,
+        points: user.actual_points,
       },
-      { status: 200 }
-    );
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "INTERNAL_SERVER_ERROR";
-    return NextResponse.json({ error: message }, { status: 500 });
+    if (error instanceof DiscordAuthError) return extensionError(error.code, error.status);
+    console.error("Extension Discord exchange failed:", error);
+    return extensionError("INTERNAL_SERVER_ERROR", 500);
   }
 }
