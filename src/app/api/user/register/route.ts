@@ -10,6 +10,8 @@ const bodySchema = z.object({
   discord_id: z.string().min(3).max(100),
   email: z.email(),
   avatar: z.string(),
+  adult_confirmed: z.boolean().optional(),
+  terms_accepted: z.boolean().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -33,6 +35,8 @@ export async function POST(request: NextRequest) {
       user_id: body.discord_id,
       profile_picture: body.avatar,
       email: body.email,
+      adult_confirmed: body.adult_confirmed,
+      terms_accepted: body.terms_accepted,
     });
 
     if (!user) {
@@ -44,6 +48,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, data: toPublicUser(user) });
   } catch (error) {
+    if (error instanceof Error && error.message === "ADULT_CONFIRMATION_REQUIRED") {
+      return NextResponse.json(
+        { success: false, error: "ADULT_CONFIRMATION_REQUIRED" },
+        { status: 400 }
+      );
+    }
+
     if (error instanceof Error && error.message === "EMAIL_ALREADY_REGISTERED") {
       return NextResponse.json(
         { success: false, error: "EMAIL_ALREADY_REGISTERED" },

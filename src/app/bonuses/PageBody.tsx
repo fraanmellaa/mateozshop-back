@@ -13,18 +13,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { Bonus } from "../utils/bonuses";
+import { HIDDEN_COUNTRIES } from "../utils/bonuses/countries";
 import BonusModal from "./BonusModal";
 
 function countriesLabel(bonus: Bonus) {
-  if (bonus.countries.length) {
-    const base = bonus.countries.filter(
-      (c) => !bonus.blocked_countries.includes(c)
-    );
-    return base.join(", ") || "Ninguno";
-  }
-  return bonus.blocked_countries.length
-    ? `Todos excepto ${bonus.blocked_countries.join(", ")}`
-    : "Todos";
+  const base = bonus.countries.filter(
+    (c) => !bonus.blocked_countries.includes(c)
+  );
+  return base.join(", ") || "Ninguno (no se muestra)";
 }
 
 async function send(url: string, method: string, body?: unknown) {
@@ -50,8 +46,9 @@ export default function PageBody({ bonuses }: { bonuses: Bonus[] }) {
   const visibleRows = filter
     ? bonuses.filter(
         (b) =>
+          !HIDDEN_COUNTRIES.includes(filter) &&
           !b.blocked_countries.includes(filter) &&
-          (b.countries.length === 0 || b.countries.includes(filter))
+          b.countries.includes(filter)
       )
     : bonuses;
 
@@ -118,7 +115,8 @@ export default function PageBody({ bonuses }: { bonuses: Bonus[] }) {
     <div className="w-full">
       <div className="flex items-center justify-between py-4">
         <p className="text-sm text-muted-foreground">
-          {bonuses.length} casinos. Solo los activos se muestran en la web.
+          {bonuses.length} casinos. Solo los activos se muestran en la web, y
+          solo en los países con licencia. Andorra (AD) queda siempre oculto.
         </p>
         <input
           value={countryFilter}
@@ -142,9 +140,11 @@ export default function PageBody({ bonuses }: { bonuses: Bonus[] }) {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead>Logo</TableHead>
               <TableHead>Casino</TableHead>
+              <TableHead>Color</TableHead>
               <TableHead>Bono</TableHead>
-              <TableHead>Países</TableHead>
+              <TableHead>Países con licencia</TableHead>
               <TableHead>Activo</TableHead>
               <TableHead>Orden</TableHead>
               <TableHead>Enlace</TableHead>
@@ -157,8 +157,38 @@ export default function PageBody({ bonuses }: { bonuses: Bonus[] }) {
                 const index = bonuses.indexOf(bonus);
                 return (
                 <TableRow key={bonus.id}>
+                  <TableCell>
+                    {bonus.image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={bonus.image}
+                        alt={`Logo de ${bonus.casino_name}`}
+                        className="h-10 w-10 rounded object-contain"
+                      />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
+                    )}
+                  </TableCell>
                   <TableCell className="font-medium">
                     {bonus.casino_name}
+                    {bonus.featured && (
+                      <span className="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-300">
+                        Destacado
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {bonus.color ? (
+                      <span className="inline-flex items-center gap-2 text-xs">
+                        <span
+                          className="h-5 w-5 rounded border"
+                          style={{ backgroundColor: bonus.color }}
+                        />
+                        {bonus.color}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
+                    )}
                   </TableCell>
                   <TableCell className="max-w-[260px] truncate">
                     {bonus.offer}
@@ -251,7 +281,7 @@ export default function PageBody({ bonuses }: { bonuses: Bonus[] }) {
               })
             ) : (
               <TableRow>
-                <TableCell colSpan={7} className="h-24 text-center">
+                <TableCell colSpan={9} className="h-24 text-center">
                   No hay bonos todavía.
                 </TableCell>
               </TableRow>

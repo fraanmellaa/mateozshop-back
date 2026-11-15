@@ -7,7 +7,14 @@ import { safeEqual } from "@/lib/env";
 // Rutas de API que no pasan por el bearer global: son públicas o cada handler
 // verifica su propia credencial (JWT de extensión, CRON_SECRET, secreto de tarea).
 const PUBLIC_API_PATHS = ["/api/auth/login", "/api/auth/logout", "/api/kick/live"];
-const SELF_AUTH_API_PREFIXES = ["/api/cron/", "/api/extension/", "/api/tasks/"];
+// Los webhooks (Kick, Twitch, Telegram) los firma la plataforma de origen: cada
+// handler verifica esa firma o secreto.
+const SELF_AUTH_API_PREFIXES = [
+  "/api/cron/",
+  "/api/extension/",
+  "/api/tasks/",
+  "/api/webhooks/",
+];
 
 function unauthorized() {
   return NextResponse.json(

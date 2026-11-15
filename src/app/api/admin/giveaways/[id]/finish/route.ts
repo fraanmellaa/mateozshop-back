@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
+import { purgePastGiveawaysCache } from "@/app/utils/frontendCache";
 import { finishGiveaway } from "@/app/utils/giveaways/admin";
+import { performGiveawayLottery } from "@/app/utils/giveaways/lottery";
 
 export async function POST(
   request: NextRequest,
@@ -28,10 +30,21 @@ export async function POST(
       );
     }
 
+    // Cierre manual: se sortea ya (idempotente; el cron no repetirá el sorteo).
+    const lottery = await performGiveawayLottery(id);
+    if (lottery.success) {
+      await purgePastGiveawaysCache().catch((error) =>
+        console.error("Error purging giveaways cache:", error)
+      );
+    }
+
     return NextResponse.json({
       success: true,
-      message: "Sorteo finalizado correctamente",
+      message: lottery.success
+        ? "Sorteo finalizado y sorteado correctamente"
+        : "Sorteo finalizado; el sorteo se hará en la próxima pasada del cron",
       giveaway,
+      lottery,
     });
   } catch (error) {
     console.error("Error finishing giveaway:", error);

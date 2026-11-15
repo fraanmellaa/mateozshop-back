@@ -22,6 +22,7 @@ export type LootBoxErrorCode =
   | "CATEGORY_WITHOUT_PRIZES"
   | "COMMON_PRIZE_MUST_BE_POINTS"
   | "PRIZE_POINTS_REQUIRED"
+  | "PRIZE_FALLBACK_REQUIRED"
   | "ITEM_PRIZE_NO_POINTS"
   | "BOX_NOT_FOUND"
   | "PRIZE_NOT_FOUND"
@@ -56,9 +57,11 @@ export type RuleIssue = { code: LootBoxErrorCode; message: string };
 
 type RulePrize = { rarity: Rarity; kind: PrizeKind; is_active: boolean; stock: number | null };
 
-/** Un premio puede tocarle a alguien: activo y con stock (NULL = ilimitado). */
-export const isAvailable = (p: { is_active: boolean; stock: number | null }) =>
-  p.is_active && (p.stock === null || p.stock > 0);
+/**
+ * Un premio puede salir sorteado si está activo. Con el stock agotado SIGUE
+ * en el pool: si sale, se pagan sus puntos de respaldo (`fallback_points`).
+ */
+export const isDrawable = (p: { is_active: boolean }) => p.is_active;
 
 /**
  * Comprueba el estado completo de una caja. Los pesos siempre deben sumar
@@ -79,19 +82,19 @@ export function boxRuleIssues(
   }
   if (!box.is_active) return issues;
 
-  const available = prizes.filter(isAvailable);
+  const available = prizes.filter(isDrawable);
   if (!available.some((p) => p.rarity === "common" && p.kind === "points")) {
     issues.push({
       code: "BOX_NEEDS_COMMON_POINTS_PRIZE",
       message:
-        "Una caja activa necesita al menos un premio Común de tipo puntos, activo y con stock (es lo mínimo que toca siempre).",
+        "Una caja activa necesita al menos un premio Común de tipo puntos, activo (es lo mínimo que toca siempre).",
     });
   }
   for (const { key, rarity } of WEIGHT_FIELDS) {
     if (box[key] > 0 && !available.some((p) => p.rarity === rarity)) {
       issues.push({
         code: "CATEGORY_WITHOUT_PRIZES",
-        message: `La categoría ${RARITY_LABELS[rarity]} tiene peso mayor que 0 pero ningún premio activo con stock.`,
+        message: `La categoría ${RARITY_LABELS[rarity]} tiene peso mayor que 0 pero ningún premio activo.`,
       });
     }
   }
@@ -163,6 +166,10 @@ const prizeShape = {
   points: z.union([int("Los puntos").min(1, "Los puntos deben ser al menos 1").max(100_000_000), z.null()]),
   weight: int("El peso").min(1, "El peso debe ser al menos 1").max(1_000_000, "Peso demasiado alto"),
   stock: z.union([int("El stock").min(0, "El stock no puede ser negativo").max(1_000_000_000), z.null()]),
+  fallback_points: z.union([
+    int("Los puntos de respaldo").min(1, "Los puntos de respaldo deben ser al menos 1").max(100_000_000),
+    z.null(),
+  ]),
   is_active: z.boolean(),
   position: int("La posición").min(-100000).max(100000),
 };
@@ -176,6 +183,7 @@ export const createPrizeSchema = z.object({
   points: prizeShape.points.optional(),
   weight: prizeShape.weight.default(1),
   stock: prizeShape.stock.optional(),
+  fallback_points: prizeShape.fallback_points.optional(),
   is_active: prizeShape.is_active.default(true),
   position: prizeShape.position.default(0),
 });
@@ -183,7 +191,13 @@ export const createPrizeSchema = z.object({
 export const updatePrizeSchema = z.object(prizeShape).partial();
 
 /** Reglas de un premio suelto (coherencia tipo / puntos / categoría). */
-export function assertPrizeShape(p: { rarity: Rarity; kind: PrizeKind; points: number | null }) {
+export function assertPrizeShape(p: {
+  rarity: Rarity;
+  kind: PrizeKind;
+  points: number | null;
+  stock: number | null;
+  fallback_points: number | null;
+}) {
   if (p.rarity === "common" && p.kind !== "points") {
     throw new LootBoxError(
       "COMMON_PRIZE_MUST_BE_POINTS",
@@ -195,6 +209,12 @@ export function assertPrizeShape(p: { rarity: Rarity; kind: PrizeKind; points: n
   }
   if (p.kind === "item" && p.points !== null) {
     throw new LootBoxError("ITEM_PRIZE_NO_POINTS", "Un premio de tipo objeto no lleva puntos.");
+  }
+  if (p.stock !== null && (p.fallback_points === null || p.fallback_points < 1)) {
+    throw new LootBoxError(
+      "PRIZE_FALLBACK_REQUIRED",
+      "Un premio con stock necesita puntos de respaldo (al menos 1): se dan si el stock se agota."
+    );
   }
 }
 

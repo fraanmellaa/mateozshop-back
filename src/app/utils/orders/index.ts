@@ -19,8 +19,12 @@ export const getOrders = async (): Promise<DecoratedOrder[]> => {
         status,
         total,
         created_at,
-        user:users!orders_user_id_fkey(id, username, email),
-        product:products!orders_product_id_fkey(id, name, image, price)
+        needs_review,
+        reviewed_at,
+        delivered_code,
+        code_email_sent,
+        user:users!orders_user_id_fkey(id, username, email, steam_trade_url),
+        product:products!orders_product_id_fkey(id, name, image, price, delivery_type)
       `
       )
       .order("id", { ascending: false })
@@ -39,6 +43,12 @@ export const getOrders = async (): Promise<DecoratedOrder[]> => {
       status: order.status,
       total: order.total,
       created_at: new Date(order.created_at * 1000).toISOString(),
+      delivery_type: (product?.delivery_type ?? "dm") as DecoratedOrder["delivery_type"],
+      needs_review: Boolean(order.needs_review),
+      reviewed: order.reviewed_at !== null && order.reviewed_at !== undefined,
+      steam_trade_url: user?.steam_trade_url ?? null,
+      has_code: Boolean(order.delivered_code),
+      code_email_sent: order.code_email_sent ?? null,
     };
   });
 };
@@ -54,8 +64,12 @@ export const getOrderById = async (orderId: number): Promise<OrderDetail | null>
       created_at,
       delivered_code,
       code_email_sent,
-      user:users!orders_user_id_fkey(id, username, email, discord_id, kick_id, image, total_points, used_points),
-      product:products!orders_product_id_fkey(id, name, description, image, price, stock, sendable)
+      needs_review,
+      reviewed_at,
+      reviewed_by,
+      review_note,
+      user:users!orders_user_id_fkey(id, username, email, discord_id, kick_id, twitch_id, steam_trade_url, image, total_points, used_points),
+      product:products!orders_product_id_fkey(id, name, description, image, price, stock, sendable, delivery_type, value_eur)
     `)
     .eq("id", orderId)
     .limit(1);
@@ -79,12 +93,21 @@ export const getOrderById = async (orderId: number): Promise<OrderDetail | null>
     created_at: new Date(order.created_at * 1000).toISOString(),
     delivered_code: order.delivered_code ?? null,
     code_email_sent: order.code_email_sent ?? null,
+    needs_review: Boolean(order.needs_review),
+    reviewed_at:
+      order.reviewed_at === null || order.reviewed_at === undefined
+        ? null
+        : new Date(order.reviewed_at * 1000).toISOString(),
+    reviewed_by: order.reviewed_by ?? null,
+    review_note: order.review_note ?? null,
     user: {
       id: user?.id ?? 0,
       username: user?.username ?? "",
       email: user?.email ?? "",
       discord_id: user?.discord_id ?? "",
       kick_id: user?.kick_id ?? null,
+      twitch_id: user?.twitch_id ?? null,
+      steam_trade_url: user?.steam_trade_url ?? null,
       image: user?.image ?? "",
       total_points: user?.total_points ?? 0,
       used_points: user?.used_points ?? 0,
@@ -98,6 +121,11 @@ export const getOrderById = async (orderId: number): Promise<OrderDetail | null>
       price: product?.price ?? 0,
       stock: product?.stock ?? 0,
       sendable: product?.sendable ?? false,
+      delivery_type: (product?.delivery_type ?? "dm") as OrderDetail["product"]["delivery_type"],
+      value_eur:
+        product?.value_eur === null || product?.value_eur === undefined
+          ? null
+          : Number(product.value_eur),
     },
   };
 };
@@ -108,7 +136,7 @@ export const getUserOrders = async (userId: number): Promise<UserOrder[]> => {
     getSupabaseAdmin()
       .from("orders")
       .select(
-        "id, status, total, created_at, product:products!orders_product_id_fkey(id, name, image)"
+        "id, status, total, created_at, needs_review, reviewed_at, product:products!orders_product_id_fkey(id, name, image, delivery_type)"
       )
       .eq("user_id", userId)
       .order("id", { ascending: false })
@@ -126,6 +154,8 @@ export const getUserOrders = async (userId: number): Promise<UserOrder[]> => {
       cost: order.total,
       status: order.status,
       created_at: new Date(order.created_at * 1000).toISOString(),
+      delivery_type: (product?.delivery_type ?? "dm") as UserOrder["delivery_type"],
+      pending_review: Boolean(order.needs_review) && !order.reviewed_at && order.status !== 2,
     };
   });
 };

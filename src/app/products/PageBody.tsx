@@ -36,6 +36,21 @@ import {
 import Image from "next/image";
 import CreateProductModal from "./CreateProductModal";
 import EditProductModal from "./EditProductModal";
+import { toDateTimeLocal } from "@/app/utils/datetime";
+
+const DELIVERY_LABEL: Record<string, string> = {
+  code: "Código",
+  dm: "Mensaje privado",
+  trade: "Steam",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  waiting: "Esperando pujas",
+  in_progress: "En batalla",
+  archived: "Sin stock",
+  finalizing: "Adjudicándose",
+  cancelling: "Retirándose",
+};
 
 export default function PageBody({ products }: { products: ProductRow[] }) {
   const router = useRouter();
@@ -49,7 +64,7 @@ export default function PageBody({ products }: { products: ProductRow[] }) {
   );
 
   const handleDeleteProduct = async (id: number) => {
-    if (!confirm("¿Estás seguro de que quieres eliminar este producto?"))
+    if (!confirm("¿Eliminar este premio? Si hay una batalla con pujas, se devuelven los puntos al mejor postor."))
       return;
 
     try {
@@ -109,7 +124,7 @@ export default function PageBody({ products }: { products: ProductRow[] }) {
     },
     {
       accessorKey: "price",
-      header: () => <div className="text-left">Precio</div>,
+      header: () => <div className="text-left">Puja mínima</div>,
       cell: ({ row }) => (
         <div className="text-left font-medium">{row.getValue("price")} pts</div>
       ),
@@ -122,20 +137,41 @@ export default function PageBody({ products }: { products: ProductRow[] }) {
       ),
     },
     {
-      accessorKey: "sendable",
-      header: () => <div className="text-left">Enviable</div>,
+      accessorKey: "value_eur",
+      header: () => <div className="text-left">Valor</div>,
       cell: ({ row }) => {
-        const sendable = row.getValue("sendable") as boolean;
+        const value = row.original.value_eur;
+        return <div className="text-left">{value === null ? "—" : `${value} €`}</div>;
+      },
+    },
+    {
+      accessorKey: "delivery_type",
+      header: () => <div className="text-left">Entrega</div>,
+      cell: ({ row }) => (
+        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-gray-300 bg-gray-500/20">
+          {DELIVERY_LABEL[row.original.delivery_type] ?? row.original.delivery_type}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "auction_status",
+      header: () => <div className="text-left">Estado</div>,
+      cell: ({ row }) => {
+        const p = row.original;
+        const status = STATUS_LABEL[p.auction_status] ?? p.auction_status;
         return (
-          <span
-            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-              sendable
-                ? "text-green-300 bg-green-500/20"
-                : "text-gray-300 bg-gray-500/20"
-            }`}
-          >
-            {sendable ? "Sí" : "No"}
-          </span>
+          <div className="text-left text-sm">
+            <div className="font-medium">{status}</div>
+            {p.auction_status === "in_progress" && (
+              <div className="text-muted-foreground">
+                {p.current_bid} pts
+                {p.current_bidder_username ? ` · ${p.current_bidder_username}` : ""}
+                {p.auction_ends_at
+                  ? ` · cierra ${toDateTimeLocal(p.auction_ends_at).replace("T", " ")}`
+                  : ""}
+              </div>
+            )}
+          </div>
         );
       },
     },
@@ -245,7 +281,7 @@ export default function PageBody({ products }: { products: ProductRow[] }) {
           className="flex items-center gap-2"
         >
           <Plus className="h-4 w-4" />
-          Crear Producto
+          Crear Premio
         </Button>
       </div>
 

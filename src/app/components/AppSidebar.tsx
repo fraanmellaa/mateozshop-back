@@ -11,6 +11,11 @@ import {
   Settings,
   Gift,
   Package,
+  Coins,
+  Radio,
+  Swords,
+  Newspaper,
+  Scale,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -69,6 +74,31 @@ const items = [
     title: "TikTok Leaderboards",
     url: "/tiktok-leaderboards",
     icon: Medal,
+  },
+  {
+    title: "Economía",
+    url: "/economy",
+    icon: Coins,
+  },
+  {
+    title: "Torneos",
+    url: "/tournaments",
+    icon: Swords,
+  },
+  {
+    title: "Pronósticos",
+    url: "/predictions",
+    icon: Newspaper,
+  },
+  {
+    title: "Textos legales",
+    url: "/legal",
+    icon: Scale,
+  },
+  {
+    title: "Conexiones",
+    url: "/connections",
+    icon: Radio,
   },
   {
     title: "Ajustes",

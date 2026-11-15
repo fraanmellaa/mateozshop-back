@@ -1,5 +1,9 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
+import { DEFAULT_COUNTRY, HIDDEN_COUNTRIES } from "./countries";
+
+export { DEFAULT_COUNTRY, HIDDEN_COUNTRIES };
+
 export interface PublicBonus {
   id: number;
   casino_name: string;
@@ -7,6 +11,10 @@ export interface PublicBonus {
   description: string | null;
   image: string | null;
   url: string | null;
+  color: string | null;
+  button_text: string | null;
+  featured: boolean;
+  conditions: string | null;
 }
 
 export interface Bonus extends PublicBonus {
@@ -24,35 +32,43 @@ export interface BonusInput {
   description?: string | null;
   image?: string | null;
   url?: string | null;
+  color?: string | null;
+  button_text?: string | null;
+  featured?: boolean;
+  conditions?: string | null;
   countries?: string[];
   blocked_countries?: string[];
   position?: number;
   is_active?: boolean;
 }
 
-const PUBLIC_COLUMNS = "id, casino_name, offer, description, image, url";
+const PUBLIC_COLUMNS = "id, casino_name, offer, description, image, url, color, button_text, featured, conditions";
 const ADMIN_COLUMNS = `${PUBLIC_COLUMNS}, countries, blocked_countries, position, is_active, created_at, updated_at`;
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 /**
- * Regla de visibilidad: activo, país no bloqueado y (lista blanca vacía o que
- * lo contenga). Con país desconocido (null) solo valen los de lista blanca vacía.
+ * Función única de visibilidad: activo, país del visitante en `countries`
+ * (países con licencia; vacía = ninguno), no bloqueado y no oculto.
+ * Sin país se trata como ES.
  */
 export function isBonusVisible(
   bonus: Pick<Bonus, "is_active" | "countries" | "blocked_countries">,
   country: string | null
 ): boolean {
   if (!bonus.is_active) return false;
-  if (country && bonus.blocked_countries.includes(country)) return false;
-  if (bonus.countries.length === 0) return true;
-  return country !== null && bonus.countries.includes(country);
+  const code = country ?? DEFAULT_COUNTRY;
+  if (HIDDEN_COUNTRIES.includes(code)) return false;
+  if (bonus.blocked_countries.includes(code)) return false;
+  return bonus.countries.includes(code);
 }
 
-/** Bonos visibles para un país (null = desconocido), en el orden de la web. */
+/** Bonos visibles para un país (null = desconocido -> ES), en el orden de la web. */
 export async function getActiveBonuses(
   country: string | null
 ): Promise<PublicBonus[]> {
+  if (HIDDEN_COUNTRIES.includes(country ?? DEFAULT_COUNTRY)) return [];
+
   const { data, error } = await getSupabaseAdmin()
     .from("bonuses")
     .select(`${PUBLIC_COLUMNS}, is_active, countries, blocked_countries`)
@@ -63,14 +79,20 @@ export async function getActiveBonuses(
   if (error) throw error;
   return ((data ?? []) as Bonus[])
     .filter((bonus) => isBonusVisible(bonus, country))
-    .map(({ id, casino_name, offer, description, image, url }) => ({
-      id,
-      casino_name,
-      offer,
-      description,
-      image,
-      url,
-    }));
+    .map(
+      ({ id, casino_name, offer, description, image, url, color, button_text, featured, conditions }) => ({
+        id,
+        casino_name,
+        offer,
+        description,
+        image,
+        url,
+        color,
+        button_text,
+        featured,
+        conditions,
+      })
+    );
 }
 
 /** Todos los bonos (panel). */
@@ -95,6 +117,10 @@ export async function createBonus(input: BonusInput): Promise<Bonus> {
       description: input.description ?? null,
       image: input.image ?? null,
       url: input.url ?? null,
+      color: input.color ?? null,
+      button_text: input.button_text ?? null,
+      featured: input.featured ?? false,
+      conditions: input.conditions ?? null,
       countries: input.countries ?? [],
       blocked_countries: input.blocked_countries ?? [],
       position: input.position ?? 0,
@@ -121,6 +147,10 @@ export async function updateBonus(
     "description",
     "image",
     "url",
+    "color",
+    "button_text",
+    "featured",
+    "conditions",
     "countries",
     "blocked_countries",
     "position",

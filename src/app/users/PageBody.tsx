@@ -26,6 +26,10 @@ import AddPointsModal from "./AddPointsModal";
 import RemovePointsModal from "./RemovePointsModal";
 import ResetPointsModal from "./ResetPointsModal";
 
+function dateTitle(ts: number | null) {
+  return ts ? `Desde ${new Date(ts * 1000).toLocaleString("es-ES")}` : undefined;
+}
+
 export default function PageBody({ users }: { users: User[] }) {
   const router = useRouter();
   const [isAddPointsOpen, setIsAddPointsOpen] = useState(false);
@@ -140,6 +144,31 @@ export default function PageBody({ users }: { users: User[] }) {
     }
   };
 
+  const handleUnlinkTwitch = async (user: User) => {
+    if (
+      !window.confirm(
+        `¿Desvincular la cuenta de Twitch de ${user.username}? Tendrá que volver a vincularla para canjear con Twitch.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}/twitch`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error("UNLINK_TWITCH_FAILED");
+      }
+
+      router.refresh();
+    } catch (error) {
+      console.error("Error unlinking Twitch account:", error);
+      alert("Error al desvincular la cuenta de Twitch");
+    }
+  };
+
   const openAddPointsModal = (user: User) => {
     setSelectedUser(user);
     setIsAddPointsOpen(true);
@@ -175,7 +204,7 @@ export default function PageBody({ users }: { users: User[] }) {
 
       header: () => <div className="text-left">Username</div>,
       cell: ({ row }) => (
-        <div className="lowercase text-left">{row.getValue("username")}</div>
+        <div className="text-left">{row.getValue("username")}</div>
       ),
     },
     {
@@ -193,7 +222,34 @@ export default function PageBody({ users }: { users: User[] }) {
         );
       },
       cell: ({ row }) => (
-        <div className="lowercase text-left">{row.original.actual_points}</div>
+        <div className="text-left">{row.original.actual_points}</div>
+      ),
+    },
+    {
+      accessorKey: "kick_username",
+      header: () => <div className="text-left">Kick</div>,
+      cell: ({ row }) => (
+        <div className="text-left" title={dateTitle(row.original.kick_linked_at)}>
+          {row.original.kick_id ? row.original.kick_username || row.original.kick_id : "—"}
+        </div>
+      ),
+    },
+    {
+      accessorKey: "twitch_username",
+      header: () => <div className="text-left">Twitch</div>,
+      cell: ({ row }) => (
+        <div className="text-left" title={dateTitle(row.original.twitch_linked_at)}>
+          {row.original.twitch_id ? row.original.twitch_username || row.original.twitch_id : "—"}
+        </div>
+      ),
+    },
+    {
+      accessorKey: "adult_confirmed_at",
+      header: () => <div className="text-left">+18</div>,
+      cell: ({ row }) => (
+        <div className="text-left" title={dateTitle(row.original.adult_confirmed_at)}>
+          {row.original.adult_confirmed_at ? "Confirmado" : "Pendiente"}
+        </div>
       ),
     },
     {
@@ -283,6 +339,14 @@ export default function PageBody({ users }: { users: User[] }) {
                 Resetear Puntos
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              {user.twitch_id && (
+                <DropdownMenuItem
+                  onClick={() => handleUnlinkTwitch(user)}
+                  className="flex items-center text-red-300"
+                >
+                  Desvincular Twitch
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={() => handleToggleBan(user)}
                 className={`flex items-center ${

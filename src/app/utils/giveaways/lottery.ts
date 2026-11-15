@@ -1,11 +1,11 @@
-import { randomInt } from "crypto";
-
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { hashSeed, newServerSeed, uniformAt } from "@/app/utils/fair";
 import { sendWinnerNotificationEmail } from "@/app/utils/email";
 import { publishUserNotification } from "@/app/utils/realtime";
 import { fetchAllRows } from "./fetchAll";
 
 type EntryRow = {
+  id: number;
   user_id: number;
   user:
     | {
@@ -28,10 +28,19 @@ async function bestEffort(label: string, fn: () => Promise<unknown>) {
 }
 
 /**
- * Sortea un sorteo terminado. Es idempotente: el `update` que lo cierra solo
- * se aplica si sigue abierto y sin ganador, y solo quien lo consigue notifica.
+ * Índice ganador verificable: floor(uniformAt(draw_seed, String(id), 0, 0) * N).
+ * Cualquiera puede recalcularlo con el draw_seed revelado (su hash se publicó
+ * al crear el sorteo) y la lista ordenada de entradas.
  */
-export const performGiveawayLottery = async (giveawayId: number) => {
+export const winnerIndex = (drawSeed: string, giveawayId: number, n: number) =>
+  Math.min(n - 1, Math.floor(uniformAt(drawSeed, String(giveawayId), 0, 0) * n));
+
+/**
+ * Sortea un sorteo terminado (o, con `force`, uno aún abierto: se cierra a la
+ * venta primero). Es idempotente: el `update` que lo cierra solo se aplica si
+ * sigue abierto y sin ganador, y solo quien lo consigue notifica.
+ */
+export const performGiveawayLottery = async (giveawayId: number, options: { force?: boolean } = {}) => {
   const supabase = getSupabaseAdmin();
 
   try {
@@ -39,7 +48,9 @@ export const performGiveawayLottery = async (giveawayId: number) => {
 
     const { data: giveawayRows, error: giveawayError } = await supabase
       .from("giveaways")
-      .select("id, title, image, end_at, winner, is_closed, sendable, codes, used_codes, comments")
+      .select(
+        "id, title, image, start_at, end_at, winner, is_closed, sendable, codes, used_codes, comments, draw_seed"
+      )
       .eq("id", giveawayId)
       .limit(1);
 
@@ -59,14 +70,28 @@ export const performGiveawayLottery = async (giveawayId: number) => {
     }
 
     if (giveaway.end_at > now) {
-      throw new Error(`El sorteo ${giveawayId} todavía no ha terminado`);
+      if (!options.force) {
+        throw new Error(`El sorteo ${giveawayId} todavía no ha terminado`);
+      }
+      // Cierre anticipado: se corta la venta ANTES de leer las entradas.
+      // buy_giveaway_ticket bloquea la fila del sorteo, así que ningún ticket
+      // pagado puede quedar fuera de la lista que se lee después.
+      const { data: cutRows, error: cutError } = await supabase
+        .from("giveaways")
+        .update({ end_at: now, start_at: Math.min(giveaway.start_at, now) })
+        .eq("id", giveawayId)
+        .is("winner", null)
+        .eq("is_closed", false)
+        .select("id");
+      if (cutError) throw cutError;
+      if (!cutRows?.length) throw new Error(`El sorteo ${giveawayId} ya ha sido procesado`);
     }
 
     const entries = await fetchAllRows<EntryRow>((from, to) =>
       supabase
         .from("giveaways_entries")
         .select(
-          "user_id, user:users!giveaways_entries_user_id_users_id_fk(discord_id, email, username, image, kick_id, is_banned)"
+          "id, user_id, user:users!giveaways_entries_user_id_users_id_fk(discord_id, email, username, image, kick_id, is_banned)"
         )
         .eq("giveaway_id", giveawayId)
         .order("id", { ascending: true })
@@ -76,6 +101,7 @@ export const performGiveawayLottery = async (giveawayId: number) => {
     const normalizedEntries = entries.map((entry) => {
       const user = Array.isArray(entry.user) ? entry.user[0] : entry.user;
       return {
+        entryId: entry.id,
         userId: entry.user_id,
         discordId: (user?.discord_id ?? null) as string | null,
         email: (user?.email ?? null) as string | null,
@@ -86,8 +112,10 @@ export const performGiveawayLottery = async (giveawayId: number) => {
       };
     });
 
-    // Los tickets de usuarios baneados no entran en el sorteo.
+    // Los tickets de usuarios baneados no entran en el sorteo. La lista queda
+    // ordenada por id de entrada y se registra (draw_log) junto con las excluidas.
     const eligibleEntries = normalizedEntries.filter((entry) => !entry.isBanned);
+    const excludedEntryIds = normalizedEntries.filter((entry) => entry.isBanned).map((e) => e.entryId);
 
     if (eligibleEntries.length === 0) {
       const { data: closedRows, error: closeError } = await supabase
@@ -113,8 +141,12 @@ export const performGiveawayLottery = async (giveawayId: number) => {
       };
     }
 
-    // Una fila = un ticket: elegir una fila al azar pondera por tickets.
-    const winner = eligibleEntries[randomInt(eligibleEntries.length)];
+    // Una fila = un ticket: elegir una fila pondera por tickets. La semilla se
+    // fijó al crear el sorteo (su hash es público); si un sorteo antiguo no la
+    // tiene, se genera ahora.
+    const drawSeed: string = giveaway.draw_seed || newServerSeed();
+    const index = winnerIndex(drawSeed, giveawayId, eligibleEntries.length);
+    const winner = eligibleEntries[index];
 
     const codes: string[] = giveaway.codes || [];
     const usedCodes: string[] = giveaway.used_codes || [];
@@ -125,6 +157,16 @@ export const performGiveawayLottery = async (giveawayId: number) => {
       .update({
         winner: winner.userId,
         is_closed: true,
+        drawn_at: now,
+        draw_seed: drawSeed,
+        draw_seed_hash: hashSeed(drawSeed),
+        draw_log: {
+          n: eligibleEntries.length,
+          index,
+          winner_entry_id: winner.entryId,
+          entry_ids: eligibleEntries.map((e) => e.entryId),
+          excluded_entry_ids: excludedEntryIds,
+        },
         ...(code ? { codes: codes.slice(1), used_codes: [...usedCodes, code] } : {}),
       })
       .eq("id", giveawayId)
@@ -226,6 +268,7 @@ export const performGiveawayLottery = async (giveawayId: number) => {
       },
       notifiedParticipants: uniqueParticipants.length,
       totalParticipants: eligibleEntries.length,
+      draw: { index, n: eligibleEntries.length },
     };
   } catch (error) {
     console.error(`Error al realizar sorteo ${giveawayId}:`, error);

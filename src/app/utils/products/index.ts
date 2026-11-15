@@ -1,21 +1,27 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { fetchAllRows } from "@/app/utils/giveaways/fetchAll";
+import { getShopSettings } from "@/app/utils/shop/settings";
+import { minNextBid } from "@/app/utils/shop/schema";
 
+export type DeliveryType = "code" | "trade" | "dm";
+export const DELIVERY_TYPES: DeliveryType[] = ["code", "trade", "dm"];
+
+/** Fila completa de `products`, para el panel. */
 export type ProductRow = {
   id: number;
   name: string;
   description: string;
   image: string;
+  /** Puja mínima (puntos). */
   price: number;
   stock: number;
+  /** Valor del premio en euros; por encima del umbral de `shop` exige revisión manual. */
+  value_eur: number | null;
+  delivery_type: DeliveryType;
+  requires_trade_link: boolean;
   is_auction: boolean;
   min_bid_increment: number;
   auction_ends_at: number | null;
-  auction_duration_seconds: number;
-  auction_cooldown_seconds: number;
-  auction_parent_product_id: number | null;
-  auction_starting_notified: boolean;
-  auction_reopens_at: number | null;
   auction_round: number;
   auction_status: string;
   auction_prize_assigned: boolean;
@@ -29,31 +35,42 @@ export type ProductRow = {
   created_at: number;
 };
 
-/** Lo que ve la web pública: sin códigos. */
-export type PublicProductRow = Omit<
-  ProductRow,
-  "codes" | "used_codes" | "auction_starting_notified"
->;
+/** Lo que ve la web pública (contrato 6.4): sin códigos. */
+export type PublicProduct = {
+  id: number;
+  name: string;
+  image: string;
+  description: string;
+  price: number;
+  stock: number;
+  auction_status: string;
+  current_bid: number;
+  current_bidder_user_id: number | null;
+  current_bidder_name: string | null;
+  current_bidder_image: string | null;
+  auction_ends_at: number | null;
+  min_next_bid: number;
+  delivery_type: DeliveryType;
+  requires_trade_link: boolean;
+};
 
 const BIDDER_EMBED = "bidder:users!products_current_bidder_user_id_fkey(username, image)";
 
-// Columnas de las rutas públicas: nunca `codes` ni `used_codes`.
+// Columnas de las rutas públicas: nunca `codes`, `used_codes` ni `value_eur`.
 const PUBLIC_PRODUCT_COLUMNS = `
-  id, name, description, image, price, stock, sendable, created_at,
-  is_auction, min_bid_increment, auction_ends_at, auction_duration_seconds,
-  auction_cooldown_seconds, auction_parent_product_id, auction_reopens_at,
-  auction_round, auction_status, auction_prize_assigned, current_bid,
-  current_bidder_user_id, ${BIDDER_EMBED}
+  id, name, description, image, price, stock, delivery_type, requires_trade_link,
+  auction_ends_at, auction_status, current_bid, current_bidder_user_id, ${BIDDER_EMBED}
 `;
 
-type ProductListOptions = {
-  includeArchivedAuctions?: boolean;
-  onlyActiveAuctions?: boolean;
-};
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = Record<string, any>;
+
+const one = (value: Row | Row[] | null | undefined): Row | undefined =>
+  Array.isArray(value) ? value[0] : value ?? undefined;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function withBidder(p: any) {
-  const bidder = Array.isArray(p.bidder) ? p.bidder[0] : p.bidder;
+  const bidder = one(p.bidder);
   const row = { ...p };
   delete row.bidder;
 
@@ -65,43 +82,48 @@ function withBidder(p: any) {
   };
 }
 
-function filterAuctions<T extends { is_auction: boolean; auction_status: string }>(
-  rows: T[],
-  options?: ProductListOptions
-) {
-  if (options?.includeArchivedAuctions) return rows;
+/** Listado para la web pública (`GET /api/products`). */
+export const getProducts = async (options?: {
+  includeArchived?: boolean;
+}): Promise<PublicProduct[]> => {
+  const [data, settings] = await Promise.all([
+    fetchAllRows<Row>((from, to) =>
+      getSupabaseAdmin()
+        .from("products")
+        .select(PUBLIC_PRODUCT_COLUMNS)
+        .order("id", { ascending: true })
+        .range(from, to)
+    ),
+    getShopSettings(),
+  ]);
 
-  if (options?.onlyActiveAuctions) {
-    return rows.filter(
-      (p) =>
-        !p.is_auction ||
-        p.auction_status === "in_progress" ||
-        p.auction_status === "finalizing"
-    );
-  }
-
-  return rows.filter((p) => !p.is_auction || p.auction_status !== "archived");
-}
-
-/** Listado para la web pública. */
-export const getProducts = async (
-  options?: ProductListOptions
-): Promise<PublicProductRow[]> => {
-  const data = await fetchAllRows((from, to) =>
-    getSupabaseAdmin()
-      .from("products")
-      .select(PUBLIC_PRODUCT_COLUMNS)
-      .order("id", { ascending: true })
-      .range(from, to)
-  );
-
-  return filterAuctions(data.map(withBidder) as PublicProductRow[], options);
+  return data
+    .filter((p) => options?.includeArchived || p.auction_status !== "archived")
+    .map((p) => {
+      const bidder = one(p.bidder);
+      const hasBidder = p.current_bidder_user_id !== null && p.auction_status !== "waiting";
+      return {
+        id: p.id,
+        name: p.name,
+        image: p.image,
+        description: p.description,
+        price: p.price,
+        stock: p.stock,
+        auction_status: p.auction_status,
+        current_bid: hasBidder ? p.current_bid : 0,
+        current_bidder_user_id: hasBidder ? p.current_bidder_user_id : null,
+        current_bidder_name: hasBidder ? bidder?.username ?? null : null,
+        current_bidder_image: hasBidder ? bidder?.image ?? null : null,
+        auction_ends_at: p.auction_status === "waiting" ? null : p.auction_ends_at,
+        min_next_bid: minNextBid(p.price, p.current_bid ?? 0, hasBidder, settings.minIncrementPct),
+        delivery_type: p.delivery_type,
+        requires_trade_link: Boolean(p.requires_trade_link),
+      } satisfies PublicProduct;
+    });
 };
 
 /** Listado para el panel: incluye códigos. */
-export const getAdminProducts = async (
-  options?: ProductListOptions
-): Promise<ProductRow[]> => {
+export const getAdminProducts = async (): Promise<ProductRow[]> => {
   const data = await fetchAllRows((from, to) =>
     getSupabaseAdmin()
       .from("products")
@@ -110,35 +132,29 @@ export const getAdminProducts = async (
       .range(from, to)
   );
 
-  const rows = data.map((p) => ({
+  return data.map((p) => ({
     ...withBidder(p),
+    value_eur: p.value_eur === null || p.value_eur === undefined ? null : Number(p.value_eur),
     codes: p.codes || [],
     used_codes: p.used_codes || [],
   })) as ProductRow[];
-
-  return filterAuctions(rows, options);
 };
 
-export const createProduct = async (data: {
+export type NewProduct = {
   name: string;
   description: string;
   image: string;
   price: number;
   stock: number;
-  is_auction?: boolean;
-  min_bid_increment?: number;
-  auction_ends_at?: number | null;
-  auction_duration_seconds?: number;
-  auction_cooldown_seconds?: number;
-  auction_parent_product_id?: number | null;
-  sendable?: boolean;
+  value_eur?: number | null;
+  delivery_type: DeliveryType;
+  requires_trade_link?: boolean;
   codes?: string[];
-}) => {
-  if (Boolean(data.is_auction) && data.stock < 1) {
-    throw new Error("AUCTION_REQUIRES_STOCK");
-  }
+};
 
-  const created_at = Math.floor(Date.now() / 1000);
+/** Todo producto nuevo es una subasta que espera la primera puja. */
+export const createProduct = async (data: NewProduct) => {
+  const isCode = data.delivery_type === "code";
 
   const { data: result, error } = await getSupabaseAdmin()
     .from("products")
@@ -148,38 +164,43 @@ export const createProduct = async (data: {
       image: data.image,
       price: data.price,
       stock: data.stock,
-      is_auction: data.is_auction ?? false,
-      min_bid_increment: data.min_bid_increment ?? 1,
-      auction_ends_at: data.auction_ends_at ?? null,
-      auction_duration_seconds: data.auction_duration_seconds ?? 3600,
-      auction_cooldown_seconds: data.auction_cooldown_seconds ?? 300,
-      auction_parent_product_id: data.auction_parent_product_id ?? null,
-      auction_starting_notified: false,
+      value_eur: data.value_eur ?? null,
+      delivery_type: data.delivery_type,
+      requires_trade_link: Boolean(data.requires_trade_link),
+      is_auction: true,
+      min_bid_increment: 1,
+      auction_ends_at: null,
       auction_reopens_at: null,
       auction_round: 1,
-      auction_status: "in_progress",
+      auction_status: "waiting",
       auction_prize_assigned: false,
-      current_bid: data.is_auction ? data.price : 0,
+      auction_starting_notified: false,
+      current_bid: 0,
       current_bidder_user_id: null,
-      sendable: data.sendable ?? false,
-      codes: data.sendable ? data.codes || [] : [],
+      sendable: isCode,
+      codes: isCode ? data.codes || [] : [],
       used_codes: [],
-      created_at,
+      created_at: Math.floor(Date.now() / 1000),
     })
     .select("*");
 
-  if (error) {
-    throw error;
-  }
-
+  if (error) throw error;
   return result?.[0];
+};
+
+/** ¿Tiene pedidos? Un producto con pedidos no se borra (se deja sin stock). */
+export const productHasOrders = async (productId: number) => {
+  const { count, error } = await getSupabaseAdmin()
+    .from("orders")
+    .select("id", { count: "exact", head: true })
+    .eq("product_id", productId);
+  if (error) throw error;
+  return (count ?? 0) > 0;
 };
 
 export const deleteProduct = async (productId: number) => {
   const { error } = await getSupabaseAdmin().from("products").delete().eq("id", productId);
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
   return true;
 };
 
@@ -195,65 +216,31 @@ export const updateProduct = async (
     image: string;
     price: number;
     stock: number;
-    is_auction: boolean;
-    min_bid_increment: number;
-    auction_ends_at: number | null;
-    auction_duration_seconds: number;
-    auction_cooldown_seconds: number;
-    auction_parent_product_id: number | null;
-    auction_starting_notified: boolean;
-    auction_reopens_at: number | null;
-    auction_round: number;
-    auction_status: string;
-    auction_prize_assigned: boolean;
-    current_bid: number;
-    current_bidder_user_id: number | null;
+    value_eur: number | null;
+    delivery_type: DeliveryType;
+    requires_trade_link: boolean;
     sendable: boolean;
     codes: string[];
     used_codes: string[];
+    auction_status: string;
+    auction_ends_at: number | null;
+    auction_prize_assigned: boolean;
+    auction_round: number;
+    current_bid: number;
+    current_bidder_user_id: number | null;
   }>
 ) => {
-  const supabase = getSupabaseAdmin();
-
-  const { data: existingRows, error: existingError } = await supabase
-    .from("products")
-    .select("stock, is_auction, auction_status")
-    .eq("id", productId)
-    .limit(1);
-
-  if (existingError) {
-    throw existingError;
-  }
-
-  const existing = existingRows?.[0];
-  if (!existing) {
-    return undefined;
-  }
-
-  const nextIsAuction = updatedFields.is_auction ?? existing.is_auction;
-  const nextStatus = updatedFields.auction_status ?? existing.auction_status;
-  const nextStock = updatedFields.stock ?? existing.stock;
-
-  // `auction_status` vale "in_progress" por defecto también en productos
-  // normales: el stock mínimo solo se exige a subastas abiertas.
-  if (nextIsAuction && nextStatus === "in_progress" && nextStock < 1) {
-    throw new Error("AUCTION_REQUIRES_STOCK");
-  }
-
   if (Object.keys(updatedFields).length === 0) {
     return getProductById(productId);
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseAdmin()
     .from("products")
     .update(updatedFields)
     .eq("id", productId)
     .select("*");
 
-  if (error) {
-    throw error;
-  }
-
+  if (error) throw error;
   return data?.[0];
 };
 
@@ -265,15 +252,14 @@ export const getProductById = async (productId: number): Promise<ProductRow | nu
     .eq("id", productId)
     .limit(1);
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 
   const p = data?.[0];
   if (!p) return null;
 
   return {
     ...withBidder(p),
+    value_eur: p.value_eur === null || p.value_eur === undefined ? null : Number(p.value_eur),
     codes: p.codes || [],
     used_codes: p.used_codes || [],
   } as ProductRow;

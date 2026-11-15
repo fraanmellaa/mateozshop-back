@@ -5,94 +5,115 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  ExtensionSettings,
+  GamesSettings,
+  MAX_RTP,
   SettingsIssue,
-  extensionSettingsSchema,
-  plinkoRtp,
+  gamesSettingsSchema,
   settingsIssues,
 } from "@/app/utils/settings/schema";
+import { OUTER_LEN, PLINKO_LEVEL_IDS, PlinkoLevelId, buildTable, rtpOf } from "@/app/utils/games/table";
 
-type FieldKind = "number" | "list";
+type FieldKind = "number" | "list" | "text";
 type Field = { path: string; label: string; kind: FieldKind; help?: string };
 
-const SECTIONS: { title: string; description: string; fields: Field[] }[] = [
+const LEVEL_NAMES: Record<PlinkoLevelId, string> = {
+  facil: "Fácil",
+  medio: "Medio",
+  hard: "Hard",
+  extreme: "Extreme",
+};
+
+const levelFields = (id: PlinkoLevelId): Field[] => [
+  { path: `plinko.levels.${id}.rtp`, label: "RTP objetivo", kind: "number", help: "Entre 0 y 0.99 (0.90 = devuelve el 90 %)." },
   {
-    title: "Puntos por ver el directo",
-    description: "El servidor da los puntos con su propio reloj; la extensión solo avisa de que sigue ahí.",
-    fields: [
-      { path: "watch.intervalSeconds", label: "Intervalo (segundos)", kind: "number" },
-      { path: "watch.pointsPerInterval", label: "Puntos por intervalo", kind: "number" },
-      {
-        path: "watch.dailyCap",
-        label: "Tope diario de puntos",
-        kind: "number",
-        help: "Vacío = sin tope.",
-      },
-    ],
+    path: `plinko.levels.${id}.outer`,
+    label: "Multiplicadores de borde",
+    kind: "list",
+    help: `${OUTER_LEN} valores, de la casilla de fuera hacia dentro (la tabla es simétrica). El centro se calcula solo para cuadrar el RTP.`,
   },
   {
-    title: "Minas",
-    description: "El retorno esperado del jugador es el borde de la casa (0.97 = devuelve el 97 %).",
-    fields: [
-      { path: "mines.minBet", label: "Apuesta mínima", kind: "number" },
-      { path: "mines.maxBet", label: "Apuesta máxima", kind: "number" },
-      {
-        path: "mines.boardSizes",
-        label: "Tamaños de tablero",
-        kind: "list",
-        help: "Separados por comas.",
-      },
-      { path: "mines.maxMinePercent", label: "Máx. proporción de minas", kind: "number" },
-      { path: "mines.houseEdge", label: "Borde de la casa", kind: "number", help: "Máximo 0.99." },
-      { path: "mines.maxMultiplier", label: "Multiplicador máximo", kind: "number" },
-    ],
+    path: `plinko.levels.${id}.maxBet`,
+    label: "Apuesta máxima del nivel",
+    kind: "number",
+    help: "Vacío = la apuesta máxima general. Se aplica la menor de las dos.",
   },
+];
+
+const SECTIONS: { title: string; description: string; fields: Field[]; level?: PlinkoLevelId }[] = [
   {
     title: "Crash",
-    description: "El retorno esperado del jugador es, como mucho, el borde de la casa.",
+    description:
+      "Con retirada automática en el objetivo del jugador. El RTP es el mismo para cualquier objetivo (el real queda algo por debajo por los redondeos).",
     fields: [
+      { path: "crash.rtp", label: "RTP", kind: "number", help: "Entre 0 y 0.99." },
+      { path: "crash.maxMult", label: "Multiplicador máximo", kind: "number" },
       { path: "crash.minBet", label: "Apuesta mínima", kind: "number" },
       { path: "crash.maxBet", label: "Apuesta máxima", kind: "number" },
-      { path: "crash.houseEdge", label: "Borde de la casa", kind: "number", help: "Máximo 1." },
-      { path: "crash.maxMultiplier", label: "Multiplicador máximo", kind: "number" },
-      { path: "crash.growthPerTick", label: "Crecimiento por tick", kind: "number" },
-      { path: "crash.tickMs", label: "Duración del tick (ms)", kind: "number" },
     ],
   },
   {
-    title: "Plinko",
-    description: "Cada casilla tiene un multiplicador y un peso (probabilidad relativa de caer en ella).",
+    title: "Plinko: límites generales",
+    description: "Plinko de 16 filas. Cada nivel tiene su propio RTP y bordes (abajo).",
     fields: [
       { path: "plinko.minBet", label: "Apuesta mínima", kind: "number" },
       { path: "plinko.maxBet", label: "Apuesta máxima", kind: "number" },
+      { path: "plinko.maxBalls", label: "Bolas por tirada (turbo)", kind: "number", help: "De 1 a 100." },
+    ],
+  },
+  ...PLINKO_LEVEL_IDS.map((id) => ({
+    title: `Plinko ${LEVEL_NAMES[id]}`,
+    description: "Más premio máximo = menos RTP. El RTP real de la tabla se calcula en vivo.",
+    fields: levelFields(id),
+    level: id,
+  })),
+  {
+    title: "Tope diario",
+    description: "Máximo de puntos apostados al día por usuario, sumando Crash y Plinko (día de Andorra).",
+    fields: [
       {
-        path: "plinko.multipliers",
-        label: "Multiplicadores",
-        kind: "list",
-        help: "Separados por comas, de izquierda a derecha.",
+        path: "dailyWagerCap",
+        label: "Tope diario (puntos)",
+        kind: "number",
+        help: "0 cierra los juegos (nadie puede apostar).",
       },
-      {
-        path: "plinko.weights",
-        label: "Pesos",
-        kind: "list",
-        help: "Enteros, uno por multiplicador. No se envían a la extensión.",
-      },
+    ],
+  },
+  {
+    title: "Torneo semanal",
+    description:
+      "Se aplica a los torneos que se creen a partir de ahora: cada torneo guarda su propia tabla. Las fichas no son puntos.",
+    fields: [
+      { path: "tournament.level", label: "Nivel de Plinko", kind: "text", help: "facil, medio, hard o extreme." },
+      { path: "tournament.spinsPerEntry", label: "Tiradas por participante", kind: "number" },
+      { path: "tournament.chipsPerSpin", label: "Fichas por tirada", kind: "number" },
     ],
   },
 ];
 
 const FIELDS = SECTIONS.flatMap((section) => section.fields);
 
-function toForm(settings: ExtensionSettings): Record<string, string> {
+function getPath(obj: unknown, path: string): unknown {
+  return path.split(".").reduce<unknown>((o, k) => (o as Record<string, unknown> | undefined)?.[k], obj);
+}
+
+function setPath(obj: Record<string, unknown>, path: string, value: unknown) {
+  const keys = path.split(".");
+  let cur = obj;
+  keys.slice(0, -1).forEach((k) => {
+    if (typeof cur[k] !== "object" || cur[k] === null) cur[k] = {};
+    cur = cur[k] as Record<string, unknown>;
+  });
+  cur[keys[keys.length - 1]] = value;
+}
+
+function toForm(settings: GamesSettings): Record<string, string> {
   const form: Record<string, string> = {};
   for (const { path } of FIELDS) {
-    const [section, key] = path.split(".");
-    const value = (settings as Record<string, Record<string, unknown>>)[section][key];
-    form[path] = Array.isArray(value) ? value.join(", ") : value === null ? "" : String(value);
+    const value = getPath(settings, path);
+    form[path] = Array.isArray(value) ? value.join(", ") : value === undefined || value === null ? "" : String(value);
   }
   return form;
 }
@@ -106,50 +127,46 @@ const toList = (text: string) =>
     .map(Number);
 
 /** Convierte el formulario en el objeto que valida el esquema. */
-function fromForm(form: Record<string, string>, requireLive: boolean) {
-  const out: Record<string, Record<string, unknown>> = {
-    watch: { requireLive },
-    mines: {},
-    crash: {},
-    plinko: {},
-  };
+function fromForm(form: Record<string, string>) {
+  const out: Record<string, unknown> = {};
   for (const { path, kind } of FIELDS) {
-    const [section, key] = path.split(".");
     const text = form[path];
-    if (path === "watch.dailyCap" && text.trim() === "") out[section][key] = null;
-    else out[section][key] = kind === "list" ? toList(text) : toNumber(text);
+    if (path.endsWith(".maxBet") && path.startsWith("plinko.levels.") && text.trim() === "") continue;
+    setPath(out, path, kind === "list" ? toList(text) : kind === "text" ? text.trim() : toNumber(text));
   }
   return out;
+}
+
+function levelPreview(form: Record<string, string>, id: PlinkoLevelId) {
+  const outer = toList(form[`plinko.levels.${id}.outer`]);
+  const rtp = toNumber(form[`plinko.levels.${id}.rtp`]);
+  if (outer.length !== OUTER_LEN || !outer.every((n) => Number.isFinite(n) && n >= 0) || !(rtp > 0)) return null;
+  const table = buildTable(outer, rtp);
+  return { table, real: rtpOf(table), target: rtp };
 }
 
 export default function PageBody({
   settings,
   defaults,
 }: {
-  settings: ExtensionSettings;
-  defaults: ExtensionSettings;
+  settings: GamesSettings;
+  defaults: GamesSettings;
 }) {
   const router = useRouter();
   const [form, setForm] = useState(() => toForm(settings));
-  const [requireLive, setRequireLive] = useState(settings.watch.requireLive);
   const [issues, setIssues] = useState<SettingsIssue[]>([]);
   const [isSaving, setIsSaving] = useState(false);
-
-  const multipliers = toList(form["plinko.multipliers"]);
-  const weights = toList(form["plinko.weights"]);
-  const rtpKnown =
-    multipliers.length === weights.length &&
-    multipliers.length > 0 &&
-    [...multipliers, ...weights].every((n) => Number.isFinite(n) && n >= 0);
-  const rtp = rtpKnown ? plinkoRtp(multipliers, weights) : null;
 
   const issuesFor = (path: string) =>
     issues.filter((issue) => issue.path === path || issue.path.startsWith(`${path}.`));
 
+  const labelFor = (path: string) =>
+    FIELDS.find((f) => path === f.path || path.startsWith(`${f.path}.`))?.label ?? path;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const parsed = extensionSettingsSchema.safeParse(fromForm(form, requireLive));
+    const parsed = gamesSettingsSchema.safeParse(fromForm(form));
     if (!parsed.success) {
       setIssues(settingsIssues(parsed.error));
       toast.error("Hay valores que no son válidos");
@@ -158,7 +175,7 @@ export default function PageBody({
 
     setIsSaving(true);
     try {
-      const response = await fetch("/api/admin/settings/extension", {
+      const response = await fetch("/api/admin/settings/games", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(parsed.data),
@@ -169,14 +186,14 @@ export default function PageBody({
         setIssues(result?.issues ?? []);
         toast.error(
           result?.error === "INVALID_SETTINGS"
-            ? "Hay valores que no son válidos"
+            ? "El servidor ha rechazado algunos valores"
             : "Error guardando los ajustes"
         );
         return;
       }
 
       setIssues([]);
-      toast.success("Ajustes guardados. La extensión los aplica en menos de un minuto.");
+      toast.success("Ajustes guardados. Se aplican en menos de un minuto.");
       router.refresh();
     } catch (error) {
       console.error("Error saving settings:", error);
@@ -186,84 +203,75 @@ export default function PageBody({
     }
   };
 
-  const handleRestoreDefaults = () => {
-    setForm(toForm(defaults));
-    setRequireLive(defaults.watch.requireLive);
-    setIssues([]);
-  };
-
   return (
     <form onSubmit={handleSubmit} className="mt-6 max-w-3xl space-y-6">
-      {SECTIONS.map((section) => (
-        <section key={section.title} className="rounded-md border p-4">
-          <h2 className="text-base font-semibold">{section.title}</h2>
-          <p className="mb-4 text-sm text-muted-foreground">{section.description}</p>
+      {SECTIONS.map((section) => {
+        const preview = section.level ? levelPreview(form, section.level) : null;
+        return (
+          <section key={section.title} className="rounded-md border p-4">
+            <h2 className="text-base font-semibold">{section.title}</h2>
+            <p className="mb-4 text-sm text-muted-foreground">{section.description}</p>
 
-          <div className="space-y-4">
-            {section.fields.map((field) => {
-              const fieldIssues = issuesFor(field.path);
-              return (
-                <div key={field.path} className="grid grid-cols-4 items-start gap-4">
-                  <Label htmlFor={field.path} className="pt-2 text-right">
-                    {field.label}
-                  </Label>
-                  <div className="col-span-3">
-                    <Input
-                      id={field.path}
-                      inputMode={field.kind === "number" ? "decimal" : "text"}
-                      value={form[field.path]}
-                      aria-invalid={fieldIssues.length > 0}
-                      onChange={(e) => setForm({ ...form, [field.path]: e.target.value })}
-                    />
-                    {field.help && (
-                      <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>
+            <div className="space-y-4">
+              {section.fields.map((field) => {
+                const fieldIssues = issuesFor(field.path);
+                return (
+                  <div key={field.path} className="grid grid-cols-4 items-start gap-4">
+                    <Label htmlFor={field.path} className="pt-2 text-right">
+                      {field.label}
+                    </Label>
+                    <div className="col-span-3">
+                      <Input
+                        id={field.path}
+                        inputMode={field.kind === "number" ? "decimal" : "text"}
+                        value={form[field.path]}
+                        aria-invalid={fieldIssues.length > 0}
+                        onChange={(e) => setForm({ ...form, [field.path]: e.target.value })}
+                      />
+                      {field.help && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
+                      {fieldIssues.map((issue, i) => (
+                        <p key={i} className="mt-1 text-xs text-destructive">
+                          {issue.message}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {section.level && (
+                <div className="grid grid-cols-4 items-start gap-4">
+                  <Label className="pt-0.5 text-right">RTP real de la tabla</Label>
+                  <div className="col-span-3 text-sm">
+                    {preview === null ? (
+                      <span className="text-muted-foreground">
+                        Introduce {OUTER_LEN} multiplicadores y un RTP para ver la tabla.
+                      </span>
+                    ) : (
+                      <>
+                        <span
+                          className={
+                            preview.real > MAX_RTP || preview.real > preview.target + 1e-9
+                              ? "font-medium text-destructive"
+                              : "font-medium"
+                          }
+                        >
+                          {(preview.real * 100).toFixed(2)} %
+                          {(preview.real > MAX_RTP || preview.real > preview.target + 1e-9) &&
+                            " — por encima del objetivo: baja los bordes, no se podrá guardar"}
+                        </span>
+                        <p className="mt-1 break-words text-xs text-muted-foreground">
+                          Tabla (17 casillas): {preview.table.join(" · ")}
+                        </p>
+                      </>
                     )}
-                    {fieldIssues.map((issue, i) => (
-                      <p key={i} className="mt-1 text-xs text-destructive">
-                        {issue.message}
-                      </p>
-                    ))}
                   </div>
                 </div>
-              );
-            })}
-
-            {section.title === "Puntos por ver el directo" && (
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label className="text-right">Exigir directo</Label>
-                <div className="col-span-3 flex items-center gap-2">
-                  <Checkbox
-                    checked={requireLive}
-                    onCheckedChange={(v) => setRequireLive(Boolean(v))}
-                  />
-                  <span className="text-sm">
-                    Solo dar puntos cuando el canal está en directo
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {section.title === "Plinko" && (
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label className="text-right">Retorno esperado</Label>
-                <div className="col-span-3 text-sm">
-                  {rtp === null ? (
-                    <span className="text-muted-foreground">
-                      Introduce el mismo número de multiplicadores que de pesos.
-                    </span>
-                  ) : (
-                    <span className={rtp > 1 ? "font-medium text-destructive" : "font-medium"}>
-                      {(rtp * 100).toFixed(1)} %
-                      {rtp > 1 && " — por encima del 100 % el juego regala puntos; no se puede guardar"}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-
-          </div>
-        </section>
-      ))}
+              )}
+            </div>
+          </section>
+        );
+      })}
 
       {issues.length > 0 && (
         <div className="rounded-md border border-destructive/50 p-4 text-sm text-destructive">
@@ -271,10 +279,7 @@ export default function PageBody({
           <ul className="mt-2 list-disc pl-5">
             {issues.map((issue, i) => (
               <li key={i}>
-                {FIELDS.find(
-                  (f) => issue.path === f.path || issue.path.startsWith(`${f.path}.`)
-                )?.label ?? issue.path}
-                : {issue.message}
+                {labelFor(issue.path)}: {issue.message}
               </li>
             ))}
           </ul>
@@ -282,7 +287,7 @@ export default function PageBody({
       )}
 
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={handleRestoreDefaults}>
+        <Button type="button" variant="outline" onClick={() => { setForm(toForm(defaults)); setIssues([]); }}>
           Valores por defecto
         </Button>
         <Button type="submit" disabled={isSaving}>

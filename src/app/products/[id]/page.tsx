@@ -57,7 +57,7 @@ export default async function ProductDetailPage({
                   </div>
                   <div>
                     <span className="text-sm font-medium text-muted-foreground">
-                      Precio
+                      Puja mínima
                     </span>
                     <p className="text-lg font-semibold">{product.price} pts</p>
                   </div>
@@ -84,25 +84,29 @@ export default async function ProductDetailPage({
 
               <div className="bg-muted/50 p-4 rounded-lg">
                 <span className="text-sm font-medium text-muted-foreground">
-                  Enviable
+                  Entrega
                 </span>
                 <div className="flex items-center gap-2 mt-1">
                   <div
                     className={`w-3 h-3 rounded-full ${
-                      product.sendable ? "bg-green-500" : "bg-gray-500"
+                      product.delivery_type === "code" ? "bg-green-500" : "bg-gray-500"
                     }`}
                   />
                   <span className="font-medium">
-                    {product.sendable
-                      ? "Sí, envía códigos"
-                      : "No envía códigos"}
+                    {product.delivery_type === "code"
+                      ? "Código por email"
+                      : product.delivery_type === "trade"
+                        ? "Skin por intercambio de Steam"
+                        : "Mensaje privado"}
+                    {product.requires_trade_link ? " · exige enlace de Steam" : ""}
+                    {product.value_eur !== null ? ` · valor ${product.value_eur} €` : ""}
                   </span>
                 </div>
               </div>
             </div>
 
             {/* Codes Section */}
-            {product.sendable && (
+            {product.delivery_type === "code" && (
               <div className="space-y-4">
                 <h2 className="text-xl font-semibold mb-4">
                   Gestión de Códigos

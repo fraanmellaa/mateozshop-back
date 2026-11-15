@@ -15,6 +15,9 @@ export interface DecoratedGiveaway {
   winner_username?: string;
   winner_image?: string;
   sendable: boolean;
+  rules: string | null;
+  draw_seed_hash: string | null;
+  drawn_at: number | null;
   status: "upcoming" | "active" | "finished";
   participants_count: number;
   created_at: string;
@@ -27,7 +30,7 @@ export async function getGiveaways(): Promise<DecoratedGiveaway[]> {
 
   const { data: rows, error } = await supabase
     .from("giveaways")
-    .select("id, title, image, cost, start_at, end_at, winner, sendable")
+    .select("id, title, image, cost, start_at, end_at, winner, sendable, rules, draw_seed_hash, drawn_at")
     .order("id", { ascending: false });
 
   if (error) throw error;
@@ -94,6 +97,9 @@ export async function getGiveaways(): Promise<DecoratedGiveaway[]> {
       winner_username: winnerMeta?.username || undefined,
       winner_image: winnerMeta?.image || undefined,
       sendable: Boolean(giveaway.sendable),
+      rules: giveaway.rules ?? null,
+      draw_seed_hash: giveaway.draw_seed_hash ?? null,
+      drawn_at: giveaway.drawn_at ?? null,
       participants_count: participantsCountByGiveaway.get(giveaway.id) || 0,
       status,
       created_at: new Date(giveaway.start_at * 1000).toLocaleDateString("es-ES"),
@@ -124,8 +130,13 @@ export async function getAdminGiveawayById(id: number) {
     winnerEmail = winnerRows?.[0]?.email || "";
   }
 
+  // La semilla del sorteo es secreta hasta que se hace: ni el admin la ve antes.
+  const { draw_seed: drawSeed, ...visible } = giveaway;
+  const drawn = giveaway.drawn_at !== null && giveaway.drawn_at !== undefined;
+
   return {
-    ...giveaway,
+    ...visible,
+    draw_seed: drawn ? drawSeed : null,
     entries: await getGiveawayEntries(giveaway.id),
     winners: await getGiveawayWinners(giveaway),
     winnerEmail,
@@ -143,6 +154,7 @@ export async function createGiveaway(data: {
   end_at: number;
   sendable?: boolean;
   codes?: string[];
+  rules?: string | null;
 }) {
   const sendable = Boolean(data.sendable);
 
@@ -156,8 +168,10 @@ export async function createGiveaway(data: {
       end_at: data.end_at,
       sendable,
       codes: sendable ? data.codes || [] : [],
+      rules: data.rules ?? null,
+      // draw_seed y draw_seed_hash los genera el trigger de la BD (0024).
     })
-    .select("*");
+    .select("id, title, image, cost, start_at, end_at, sendable, rules, draw_seed_hash");
 
   if (error) throw error;
 
@@ -175,6 +189,7 @@ export async function updateGiveaway(
     sendable?: boolean;
     codes?: string[];
     used_codes?: string[];
+    rules?: string | null;
   }
 ) {
   // Solo se tocan los campos recibidos: desmarcar "enviable" no borra códigos.
@@ -188,12 +203,24 @@ export async function updateGiveaway(
   if (data.sendable !== undefined) updateData.sendable = data.sendable;
   if (data.codes !== undefined) updateData.codes = data.codes;
   if (data.used_codes !== undefined) updateData.used_codes = data.used_codes;
+  if (data.rules !== undefined) updateData.rules = data.rules;
+
+  // Las bases no se pueden cambiar una vez hecho el sorteo.
+  if (data.rules !== undefined) {
+    const { data: current, error: currentError } = await getSupabaseAdmin()
+      .from("giveaways")
+      .select("drawn_at")
+      .eq("id", id)
+      .maybeSingle();
+    if (currentError) throw currentError;
+    if (current?.drawn_at != null) throw new Error("RULES_LOCKED");
+  }
 
   const { data: result, error } = await getSupabaseAdmin()
     .from("giveaways")
     .update(updateData)
     .eq("id", id)
-    .select("*");
+    .select("id, title, image, cost, start_at, end_at, winner, sendable, rules, draw_seed_hash, drawn_at");
 
   if (error) throw error;
 

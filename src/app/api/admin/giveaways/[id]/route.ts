@@ -21,6 +21,7 @@ export async function PUT(
       sendable,
       codes,
       used_codes,
+      rules,
     } = body;
 
     if (isNaN(id)) {
@@ -39,6 +40,7 @@ export async function PUT(
       sendable?: boolean;
       codes?: string[];
       used_codes?: string[];
+      rules?: string | null;
     } = {};
 
     if (title) updateData.title = title;
@@ -54,6 +56,15 @@ export async function PUT(
     }
     if (codes !== undefined) updateData.codes = codes;
     if (used_codes !== undefined) updateData.used_codes = used_codes;
+    if (rules !== undefined) {
+      if (rules !== null && (typeof rules !== "string" || rules.length > 10000)) {
+        return NextResponse.json(
+          { error: "Las bases deben ser un texto de hasta 10000 caracteres" },
+          { status: 400 }
+        );
+      }
+      updateData.rules = typeof rules === "string" && rules.trim() ? rules.trim() : null;
+    }
 
     if (
       updateData.start_at &&
@@ -88,6 +99,12 @@ export async function PUT(
 
     return NextResponse.json(giveaway);
   } catch (error) {
+    if (error instanceof Error && error.message === "RULES_LOCKED") {
+      return NextResponse.json(
+        { error: "Las bases no se pueden cambiar una vez hecho el sorteo" },
+        { status: 409 }
+      );
+    }
     console.error("Error updating giveaway:", error);
     return NextResponse.json(
       { error: "Error interno del servidor" },

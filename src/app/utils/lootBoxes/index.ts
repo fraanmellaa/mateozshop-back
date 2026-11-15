@@ -1,14 +1,16 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { openLootBoxAtomic, PointsError, isPointsError } from "@/app/utils/points";
+import { fairReserve, type FairState } from "@/app/utils/fair";
+import { PointsError, isPointsError, type PointsErrorCode } from "@/app/utils/points";
 
-import { drawPrize } from "./draw";
+import { drawPrize, fairUniform } from "./draw";
+import { GateError, assertCanSpend, isGateCode } from "./gates";
 import {
   LootBoxError,
   assertBoxRules,
   assertPrizeShape,
   createBoxSchema,
   createPrizeSchema,
-  isAvailable,
+  isDrawable,
   updateBoxSchema,
   updatePrizeSchema,
   zodMessage,
@@ -19,6 +21,7 @@ import {
   type AdminOpening,
   type BoxOdds,
   type BoxRow,
+  type OpenedPrize,
   type OpeningStatus,
   type PrizeKind,
   type PrizeRow,
@@ -37,11 +40,14 @@ const rarityOrder = (r: Rarity) => RARITIES.indexOf(r);
 const BOX_COLUMNS =
   "id, name, description, image, price, weight_common, weight_rare, weight_epic, weight_legendary, position, is_active, created_at, updated_at";
 const PRIZE_COLUMNS =
-  "id, box_id, rarity, kind, name, description, image, points, weight, stock, is_active, position, created_at, updated_at";
+  "id, box_id, rarity, kind, name, description, image, points, weight, stock, fallback_points, is_active, position, created_at, updated_at";
 
 // ───────────────────────── lectura pública ─────────────────────────
 
-/** Cajas activas con sus premios activos y con stock. Nunca pesos ni stock. */
+/**
+ * Cajas activas con sus premios activos. Un premio agotado sigue en la lista
+ * (puede salir y dar sus puntos de respaldo). Nunca pesos, stock ni respaldo.
+ */
 export async function getPublicLootBoxes(): Promise<PublicBox[]> {
   const { data, error } = await getSupabaseAdmin()
     .from("loot_boxes")
@@ -58,7 +64,7 @@ export async function getPublicLootBoxes(): Promise<PublicBox[]> {
     image: box.image,
     price: box.price,
     prizes: (box.prizes || [])
-      .filter(isAvailable)
+      .filter(isDrawable)
       .sort(
         (a, b) =>
           rarityOrder(a.rarity) - rarityOrder(b.rarity) || a.position - b.position || a.id - b.id
@@ -77,32 +83,68 @@ export async function getPublicLootBoxes(): Promise<PublicBox[]> {
   }));
 }
 
-/** Probabilidades por categoría en puntos básicos (7000 = 70 %). */
+/**
+ * Probabilidades publicadas: por categoría (puntos básicos, 7000 = 70 %) y por
+ * premio. Reproduce exactamente el sorteo de `drawPrize`: la categoría sale por
+ * peso y, dentro de ella, el premio por su peso relativo; una categoría sin
+ * premios activos cede su probabilidad a la inferior.
+ */
 export async function getLootBoxOdds(): Promise<BoxOdds[]> {
   const { data, error } = await getSupabaseAdmin()
     .from("loot_boxes")
-    .select("id, name, weight_common, weight_rare, weight_epic, weight_legendary")
+    .select(
+      "id, name, weight_common, weight_rare, weight_epic, weight_legendary, prizes:loot_box_prizes(name, rarity, weight, is_active, position, id)"
+    )
     .eq("is_active", true)
     .order("position", { ascending: true })
     .order("id", { ascending: true });
   if (error) throw error;
 
-  return ((data || []) as unknown as BoxRow[]).map((b) => ({
-    id: b.id,
-    name: b.name,
-    odds: {
+  type OddsPrize = { name: string; rarity: Rarity; weight: number; is_active: boolean; position: number; id: number };
+
+  return ((data || []) as unknown as (BoxRow & { prizes: OddsPrize[] })[]).map((b) => {
+    const odds = {
       common: b.weight_common,
       rare: b.weight_rare,
       epic: b.weight_epic,
       legendary: b.weight_legendary,
-    },
-  }));
+    };
+    const active = (b.prizes || []).filter((p) => p.is_active && p.weight > 0);
+
+    // Masa efectiva por categoría: de la más alta a la más baja, una categoría
+    // sin premios cede lo suyo a la siguiente inferior.
+    const effective: Record<Rarity, number> = { common: 0, rare: 0, epic: 0, legendary: 0 };
+    for (let i = RARITIES.length - 1; i >= 0; i--) {
+      const rarity = RARITIES[i];
+      let mass = odds[rarity];
+      for (let j = i; j >= 0 && mass > 0; j--) {
+        if (active.some((p) => p.rarity === RARITIES[j])) {
+          effective[RARITIES[j]] += mass;
+          mass = 0;
+        }
+      }
+    }
+
+    const prizes = [...active]
+      .sort(
+        (a, c) => rarityOrder(a.rarity) - rarityOrder(c.rarity) || a.position - c.position || a.id - c.id
+      )
+      .map((p) => {
+        const categoryWeight = active
+          .filter((q) => q.rarity === p.rarity)
+          .reduce((sum, q) => sum + q.weight, 0);
+        const probability = categoryWeight > 0 ? (effective[p.rarity] * p.weight) / categoryWeight : 0;
+        return { name: p.name, rarity: p.rarity, probability: Math.round(probability * 100) / 100 };
+      });
+
+    return { id: b.id, name: b.name, odds, prizes };
+  });
 }
 
 export async function getUserLootBoxOpenings(userId: number): Promise<UserOpening[]> {
   const { data, error } = await getSupabaseAdmin()
     .from("loot_box_openings")
-    .select("id, box_name, prize_name, rarity, kind, points_awarded, status, delivery_note, created_at")
+    .select("id, box_name, prize_name, rarity, kind, points_awarded, status, delivery_note, fallback, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
@@ -227,6 +269,7 @@ export async function createLootBoxPrize(boxId: number, input: unknown): Promise
     image: data.image ?? null,
     points: data.points ?? null,
     stock: data.stock ?? null,
+    fallback_points: data.fallback_points ?? null,
   };
   assertPrizeShape(prize);
   // Añadir un premio no puede romper una caja activa, pero se comprueba el estado final.
@@ -280,7 +323,7 @@ export async function deleteLootBoxPrize(prizeId: number): Promise<void> {
 export const OPENINGS_PAGE_SIZE = 100;
 
 const OPENING_COLUMNS =
-  "id, user_id, box_id, prize_id, box_name, prize_name, rarity, kind, points_awarded, price_paid, status, delivery_note, delivered_at, created_at";
+  "id, user_id, box_id, prize_id, box_name, prize_name, rarity, kind, points_awarded, price_paid, status, delivery_note, delivered_at, created_at, fallback, server_seed_hash, client_seed, fair_nonce";
 
 type OpeningDbRow = Omit<AdminOpening, "user"> & { user: AdminOpening["user"] | AdminOpening["user"][] };
 
@@ -358,19 +401,63 @@ export async function markOpeningDelivered(
 
 export type OpenedLootBox = {
   opening_id: number;
-  prize: PublicPrize;
+  prize: OpenedPrize;
+  status: "completed" | "pending";
+  balance: number;
+  fair: FairState;
+};
+
+type OpenRpcResult = {
+  opening_id: number;
+  prize_id: number;
+  kind: "points" | "item";
+  points_awarded: number;
+  fallback: boolean;
   status: "completed" | "pending";
   balance: number;
 };
 
+const SQL_PASSTHROUGH = new Set<string>([
+  "BOX_NOT_FOUND",
+  "BOX_NOT_ACTIVE",
+  "PRIZE_UNAVAILABLE",
+  "PRIZE_OUT_OF_STOCK",
+  "USER_NOT_FOUND",
+  "USER_BANNED",
+  "INSUFFICIENT_POINTS",
+]);
+
+/** open_loot_box (versión verificable, 0024). Traduce los errores de negocio. */
+async function openLootBoxFairAtomic(userId: number, boxId: number, prizeId: number, fair: FairState) {
+  const { data, error } = await getSupabaseAdmin().rpc("open_loot_box", {
+    p_user_id: userId,
+    p_box_id: boxId,
+    p_prize_id: prizeId,
+    p_fair: fair,
+  });
+  if (error) {
+    const code = String(error.message || "").trim();
+    if (isGateCode(code)) {
+      throw new GateError(code, code === "ACCOUNT_TOO_NEW" && error.details ? { minDays: Number(error.details) } : {});
+    }
+    if (SQL_PASSTHROUGH.has(code)) throw new PointsError(code as PointsErrorCode, error.details ?? null);
+    throw new Error(`open_loot_box failed: ${code || "unknown error"}`);
+  }
+  return data as OpenRpcResult;
+}
+
 const MAX_ATTEMPTS = 3;
 
 /**
- * Abre una caja: sortea el premio en el servidor (crypto.randomInt) y delega
- * el cobro y el registro en open_loot_box (atómica). Si el premio sorteado se
- * agotó o se desactivó entre el sorteo y la apertura, se vuelve a sortear
- * con datos frescos (máx. 3 intentos); después NO_PRIZES_AVAILABLE.
- * Lanza PointsError con los códigos de negocio.
+ * Abre una caja. El resultado se decide en el servidor con aleatoriedad
+ * verificable (utils/fair): se reserva un nonce, la categoría sale del cursor 0
+ * y el premio del cursor 1. open_loot_box (atómica) cobra, descuenta stock,
+ * registra y abona. Si el premio sorteado se desactivó entre el sorteo y la
+ * apertura se vuelve a sortear con datos frescos y otro nonce (máx. 3
+ * intentos); después NO_PRIZES_AVAILABLE. Un premio con stock agotado NO
+ * falla: entrega sus puntos de respaldo (`prize.fallback = true`).
+ * Los requisitos de cuenta se validan ANTES de reservar nonce.
+ * Lanza PointsError / GateError / AccountError con los códigos de negocio.
  */
 export async function openLootBox(userId: number, boxId: number): Promise<OpenedLootBox> {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -385,23 +472,42 @@ export async function openLootBox(userId: number, boxId: number): Promise<Opened
     const box = data as unknown as BoxRow & { prizes: PrizeRow[] };
     if (!box.is_active) throw new PointsError("BOX_NOT_ACTIVE");
 
-    const prize = drawPrize(box, (box.prizes || []).filter(isAvailable));
+    const pool = (box.prizes || []).filter(isDrawable);
+    if (!pool.some((p) => p.weight > 0)) throw new PointsError("NO_PRIZES_AVAILABLE");
+
+    const { balance } = await assertCanSpend(userId);
+    if (balance < box.price) throw new PointsError("INSUFFICIENT_POINTS");
+
+    const reservation = await fairReserve(userId, 1);
+    const prize = drawPrize(
+      box,
+      pool,
+      fairUniform(reservation.server_seed, reservation.client_seed, reservation.nonce_start)
+    );
     if (!prize) throw new PointsError("NO_PRIZES_AVAILABLE");
 
+    const fair: FairState = {
+      server_seed_hash: reservation.server_seed_hash,
+      client_seed: reservation.client_seed,
+      nonce: reservation.nonce_start,
+    };
+
     try {
-      const result = await openLootBoxAtomic(userId, boxId, prize.id);
+      const result = await openLootBoxFairAtomic(userId, boxId, prize.id, fair);
       return {
         opening_id: Number(result.opening_id),
         status: result.status,
         balance: result.balance,
+        fair,
         prize: {
           id: prize.id,
           name: prize.name,
           description: prize.description,
           image: prize.image,
           rarity: prize.rarity,
-          kind: prize.kind,
-          points: prize.points,
+          kind: result.kind,
+          points: result.kind === "points" ? result.points_awarded : null,
+          fallback: result.fallback,
         },
       };
     } catch (err) {

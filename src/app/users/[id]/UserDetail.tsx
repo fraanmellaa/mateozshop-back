@@ -23,8 +23,11 @@ interface UserDetailProps {
 export default function UserDetail({ user }: UserDetailProps) {
   const router = useRouter();
   const userDate = new Date(user.created_at);
+  const formatSeconds = (ts: number | null) =>
+    ts ? new Date(ts * 1000).toLocaleString("es-ES") : "—";
   const isBanned = Boolean(user.is_banned);
   const [isUnlinking, setIsUnlinking] = useState(false);
+  const [isUnlinkingTwitch, setIsUnlinkingTwitch] = useState(false);
 
   const handleUnlinkKick = async () => {
     if (
@@ -52,6 +55,35 @@ export default function UserDetail({ user }: UserDetailProps) {
       toast.error("Error al desvincular la cuenta de Kick");
     } finally {
       setIsUnlinking(false);
+    }
+  };
+
+  const handleUnlinkTwitch = async () => {
+    if (
+      !window.confirm(
+        `¿Desvincular la cuenta de Twitch de ${user.username}? Tendrá que volver a vincularla para canjear con Twitch.`
+      )
+    ) {
+      return;
+    }
+
+    setIsUnlinkingTwitch(true);
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}/twitch`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error("UNLINK_TWITCH_FAILED");
+      }
+
+      toast.success("Cuenta de Twitch desvinculada");
+      router.refresh();
+    } catch (error) {
+      console.error("Error unlinking Twitch account:", error);
+      toast.error("Error al desvincular la cuenta de Twitch");
+    } finally {
+      setIsUnlinkingTwitch(false);
     }
   };
 
@@ -135,6 +167,52 @@ export default function UserDetail({ user }: UserDetailProps) {
           </div>
           <div>
             <label className="text-sm font-medium text-muted-foreground">
+              Kick vinculado el
+            </label>
+            <p className="text-lg text-foreground">{formatSeconds(user.kick_linked_at)}</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-muted-foreground">
+              Twitch ID
+            </label>
+            <p className="text-lg font-mono text-foreground">
+              {user.twitch_id || "No vinculado"}
+            </p>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-muted-foreground">
+              Usuario de Twitch
+            </label>
+            <p className="text-lg font-mono text-foreground">
+              {user.twitch_username || "No vinculado"}
+            </p>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-muted-foreground">
+              Twitch vinculado el
+            </label>
+            <p className="text-lg text-foreground">{formatSeconds(user.twitch_linked_at)}</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-muted-foreground">
+              Cuenta de Twitch creada el
+            </label>
+            <p className="text-lg text-foreground">{formatSeconds(user.twitch_created_at)}</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-muted-foreground">
+              Mayor de 18 confirmado
+            </label>
+            <p className="text-lg text-foreground">{formatSeconds(user.adult_confirmed_at)}</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-muted-foreground">
+              Términos aceptados
+            </label>
+            <p className="text-lg text-foreground">{formatSeconds(user.terms_accepted_at)}</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-muted-foreground">
               ID de Usuario
             </label>
             <p className="text-lg font-mono text-foreground">#{user.id}</p>
@@ -215,6 +293,17 @@ export default function UserDetail({ user }: UserDetailProps) {
             >
               <Unlink className="h-4 w-4" />
               {isUnlinking ? "Desvinculando..." : "Desvincular Kick"}
+            </Button>
+          )}
+          {user.twitch_id && (
+            <Button
+              variant="destructive"
+              onClick={handleUnlinkTwitch}
+              disabled={isUnlinkingTwitch}
+              className="flex items-center gap-2"
+            >
+              <Unlink className="h-4 w-4" />
+              {isUnlinkingTwitch ? "Desvinculando..." : "Desvincular Twitch"}
             </Button>
           )}
         </div>

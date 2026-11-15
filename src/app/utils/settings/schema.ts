@@ -1,138 +1,140 @@
 import { z } from "zod";
 
+import { OUTER_LEN, PLINKO_LEVEL_IDS, type PlinkoLevelId, buildTable, rtpOf } from "../games/table";
+
 /**
- * Esquema y valores por defecto de los ajustes de la extensión. Módulo puro
- * (sin BD ni `crypto`): lo usan el servidor y el formulario del panel.
- *
- * Las validaciones impiden guardar una configuración en la que un juego
- * devuelva de media más de lo apostado.
+ * Esquema y valores por defecto de los ajustes de juegos (clave `games` de
+ * `app_settings`). Módulo puro (sin BD ni `crypto`): lo usan el servidor y el
+ * panel. Las validaciones impiden guardar una configuración que regale puntos:
+ * todo RTP está en (0, 0.99] y el RTP real de cada tabla construida también.
  */
 
+export const MAX_RTP = 0.99;
+const RTP_EPS = 1e-9;
+/** Pago máximo posible en una petición: tiene que caber en un integer de Postgres. */
+const MAX_PAYOUT_PER_REQUEST = 1_500_000_000;
+
 const bet = z.number().int().min(1).max(1_000_000);
-const betRange = (v: { minBet: number; maxBet: number }) => v.minBet <= v.maxBet;
-const betRangeError = {
+const rtp = z
+  .number()
+  .refine((v) => v > 0 && v <= MAX_RTP, "El RTP tiene que estar entre 0 (sin incluir) y 0.99");
+const betRangeError = (path: string) => ({
   message: "La apuesta mínima no puede superar la máxima",
-  path: ["minBet"],
-};
-
-/** Retorno esperado del Plinko: Σ(peso × multiplicador) / Σ pesos. */
-export function plinkoRtp(multipliers: number[], weights: number[]): number {
-  let total = 0;
-  let sum = 0;
-  for (let i = 0; i < weights.length; i++) {
-    total += weights[i];
-    sum += weights[i] * (multipliers[i] ?? 0);
-  }
-  return total > 0 ? sum / total : 0;
-}
-
-const watchSchema = z.object({
-  intervalSeconds: z.number().int().min(15).max(86_400),
-  pointsPerInterval: z.number().int().min(1).max(100_000),
-  requireLive: z.boolean(),
-  dailyCap: z.number().int().min(1).max(100_000_000).nullable(),
+  path: [path],
 });
-
-const minesSchema = z
-  .object({
-    minBet: bet,
-    maxBet: bet,
-    boardSizes: z.array(z.number().int().min(2).max(12)).min(1).max(6),
-    maxMinePercent: z.number().min(0.05).max(0.95),
-    // Tope 0.99 y no 1: el multiplicador se redondea a 2 decimales, lo que
-    // puede subir el retorno hasta medio punto por encima de houseEdge.
-    houseEdge: z.number().min(0.5).max(0.99),
-    maxMultiplier: z.number().min(1.01).max(1000),
-  })
-  .refine(betRange, betRangeError)
-  .refine((v) => new Set(v.boardSizes).size === v.boardSizes.length, {
-    message: "Hay tamaños de tablero repetidos",
-    path: ["boardSizes"],
-  })
-  .refine(
-    (v) => v.boardSizes.every((size) => Math.floor(size * size * v.maxMinePercent) >= 1),
-    {
-      message: "Con ese porcentaje algún tablero no admite ninguna mina",
-      path: ["maxMinePercent"],
-    }
-  );
 
 const crashSchema = z
   .object({
+    rtp,
+    maxMult: z.number().min(1.01).max(100_000),
     minBet: bet,
     maxBet: bet,
-    houseEdge: z.number().min(0.5).max(1),
-    maxMultiplier: z.number().min(1.1).max(1000),
-    growthPerTick: z.number().min(1.001).max(1.5),
-    tickMs: z.number().int().min(20).max(2000),
   })
-  .refine(betRange, betRangeError);
+  .refine((v) => v.minBet <= v.maxBet, betRangeError("minBet"))
+  .refine((v) => v.maxBet * v.maxMult <= MAX_PAYOUT_PER_REQUEST, {
+    message: "Apuesta máxima × multiplicador máximo es demasiado grande",
+    path: ["maxMult"],
+  });
+
+const levelSchema = z.object({
+  outer: z
+    .array(z.number().min(0).max(100_000))
+    .refine((a) => a.length === OUTER_LEN, `Hacen falta ${OUTER_LEN} multiplicadores de borde`),
+  rtp,
+  maxBet: bet.optional(),
+});
 
 const plinkoSchema = z
   .object({
     minBet: bet,
     maxBet: bet,
-    multipliers: z.array(z.number().min(0).max(1000)).min(2).max(15),
-    weights: z.array(z.number().int().min(0).max(1_000_000)).min(2).max(15),
+    maxBalls: z.number().int().min(1).max(100),
+    levels: z.object({
+      facil: levelSchema,
+      medio: levelSchema,
+      hard: levelSchema,
+      extreme: levelSchema,
+    }),
   })
-  .refine(betRange, betRangeError)
-  .refine((v) => v.multipliers.length === v.weights.length, {
-    message: "Tiene que haber un peso por cada multiplicador",
-    path: ["weights"],
-  })
-  .refine((v) => v.weights.some((w) => w > 0), {
-    message: "Algún peso tiene que ser mayor que 0",
-    path: ["weights"],
-  })
-  .refine(
-    (v) =>
-      v.multipliers.length !== v.weights.length ||
-      plinkoRtp(v.multipliers, v.weights) <= 1 + 1e-9,
-    {
-      message: "El retorno esperado del Plinko supera el 100 %: regalaría puntos",
-      path: ["multipliers"],
+  .refine((v) => v.minBet <= v.maxBet, betRangeError("minBet"))
+  .superRefine((v, ctx) => {
+    for (const id of PLINKO_LEVEL_IDS) {
+      const level = v.levels[id];
+      const maxBet = effectiveMaxBet(v, id);
+      if (v.minBet > maxBet) {
+        ctx.addIssue({
+          code: "custom",
+          message: "La apuesta mínima supera la máxima de este nivel",
+          path: ["levels", id, "maxBet"],
+        });
+      }
+      const table = buildTable(level.outer, level.rtp);
+      const real = rtpOf(table);
+      if (real > MAX_RTP + RTP_EPS || real > level.rtp + RTP_EPS) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Con esos multiplicadores de borde el RTP real sería ${(real * 100).toFixed(2)} %, por encima del objetivo (${(level.rtp * 100).toFixed(1)} %). Baja los bordes`,
+          path: ["levels", id, "outer"],
+        });
+      }
+      const top = Math.max(...table);
+      if (maxBet * top * v.maxBalls > MAX_PAYOUT_PER_REQUEST) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Apuesta máxima × multiplicador máximo × bolas es demasiado grande",
+          path: ["levels", id, "outer"],
+        });
+      }
     }
-  );
+  });
 
-export const extensionSettingsSchema = z.object({
-  watch: watchSchema,
-  mines: minesSchema,
-  crash: crashSchema,
-  plinko: plinkoSchema,
+const tournamentSchema = z.object({
+  level: z.enum(PLINKO_LEVEL_IDS),
+  spinsPerEntry: z.number().int().min(1).max(10_000),
+  chipsPerSpin: z.number().int().min(1).max(1_000_000),
 });
 
-export type ExtensionSettings = z.infer<typeof extensionSettingsSchema>;
+export const gamesSettingsSchema = z.object({
+  crash: crashSchema,
+  plinko: plinkoSchema,
+  /** Máximo apostado al día por usuario (Crash + Plinko). 0 = los juegos quedan cerrados. */
+  dailyWagerCap: z.number().int().min(0).max(1_000_000_000),
+  tournament: tournamentSchema,
+});
 
-export const DEFAULT_EXTENSION_SETTINGS: ExtensionSettings = {
-  watch: {
-    intervalSeconds: 300,
-    pointsPerInterval: 10,
-    requireLive: true,
-    dailyCap: null,
-  },
-  mines: {
-    minBet: 10,
-    maxBet: 500,
-    boardSizes: [4, 8, 10],
-    maxMinePercent: 0.75,
-    houseEdge: 0.97,
-    maxMultiplier: 50,
-  },
-  crash: {
-    minBet: 10,
-    maxBet: 500,
-    houseEdge: 0.97,
-    maxMultiplier: 40,
-    growthPerTick: 1.035,
-    tickMs: 120,
-  },
+export type GamesSettings = z.infer<typeof gamesSettingsSchema>;
+
+export const DEFAULT_GAMES_SETTINGS: GamesSettings = {
+  crash: { rtp: 0.9, maxMult: 1000, minBet: 10, maxBet: 2000 },
   plinko: {
     minBet: 10,
-    maxBet: 500,
-    multipliers: [0.2, 0.6, 1.0, 1.4, 2.0, 3.5],
-    weights: [23, 25, 25, 15, 8, 4], // retorno esperado 95,6 %
+    maxBet: 1000,
+    maxBalls: 100,
+    levels: {
+      facil: { outer: [16, 9, 2, 1.4, 1.4, 1.2], rtp: 0.92 },
+      medio: { outer: [110, 41, 10, 5, 3, 1.5], rtp: 0.9 },
+      hard: { outer: [1000, 130, 26, 9, 4, 1.5], rtp: 0.88 },
+      extreme: { outer: [10000, 250, 25, 5, 1, 0.5], rtp: 0.8, maxBet: 100 },
+    },
   },
+  dailyWagerCap: 10_000,
+  tournament: { level: "medio", spinsPerEntry: 1000, chipsPerSpin: 100 },
 };
+
+/** Apuesta máxima efectiva de un nivel: la menor entre la general y la del nivel. */
+export function effectiveMaxBet(
+  plinko: { maxBet: number; levels: Record<PlinkoLevelId, { maxBet?: number }> },
+  level: PlinkoLevelId
+): number {
+  return Math.min(plinko.maxBet, plinko.levels[level].maxBet ?? plinko.maxBet);
+}
+
+/** Tabla de 17 multiplicadores y RTP real de un nivel. */
+export function plinkoTable(settings: GamesSettings, level: PlinkoLevelId) {
+  const l = settings.plinko.levels[level];
+  const table = buildTable(l.outer, l.rtp);
+  return { table, rtp: rtpOf(table) };
+}
 
 export type SettingsIssue = { path: string; message: string };
 

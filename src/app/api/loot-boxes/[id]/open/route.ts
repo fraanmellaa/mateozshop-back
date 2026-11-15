@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { sendWinnerNotificationEmail } from "@/app/utils/email";
+import { accountErrorResponse } from "@/app/utils/accounts";
 import { openLootBox } from "@/app/utils/lootBoxes";
+import { gateErrorResponse } from "@/app/utils/lootBoxes/gates";
 import { pointsErrorResponse } from "@/app/utils/products/pointsErrors";
 import { getUserByDiscordId } from "@/app/utils/users";
+import { isResetBlocking } from "@/app/utils/economy/monthly";
 
 const bodySchema = z.object({
   discord_id: z.string().min(1),
@@ -26,6 +29,15 @@ export async function POST(
   }
 
   try {
+    // Durante el reinicio mensual no se puja ni se compra: lo gastado ahora se
+    // perdería (o quedaría retenido) al poner los saldos a cero.
+    if (await isResetBlocking()) {
+      return NextResponse.json(
+        { success: false, error: "MONTHLY_RESET_IN_PROGRESS" },
+        { status: 409 }
+      );
+    }
+
     const user = await getUserByDiscordId(parsed.data.discord_id);
     if (!user) {
       return NextResponse.json({ success: false, error: "USER_NOT_FOUND" }, { status: 404 });
@@ -35,7 +47,7 @@ export async function POST(
     const opened = await openLootBox(user.id, boxId);
 
     // La apertura ya existe: un fallo de email no la anula.
-    if (opened.prize.kind === "item") {
+    if (opened.prize.kind === "item" && !opened.prize.fallback) {
       try {
         const sent = await sendWinnerNotificationEmail({
           to: user.email,
@@ -58,12 +70,14 @@ export async function POST(
           prize: opened.prize,
           status: opened.status,
           balance: opened.balance,
+          fair: opened.fair,
         },
       },
       { status: 200 }
     );
   } catch (error) {
-    const response = pointsErrorResponse(error);
+    const response =
+      accountErrorResponse(error) ?? gateErrorResponse(error) ?? pointsErrorResponse(error);
     if (response) return response;
 
     console.error("Error opening loot box:", error);

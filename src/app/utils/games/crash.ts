@@ -1,48 +1,46 @@
-import { randomInt } from "crypto";
-
-/** Estado de una ronda de crash. `crashAt` es secreto mientras esté activa. */
-export type CrashState = {
-  crashAt: number;
-  /** Instante de inicio según el reloj del servidor (ms). */
-  startedAtMs: number;
-  // Parámetros fijados al empezar: un cambio de ajustes no altera la ronda.
-  growthPerTick: number;
-  tickMs: number;
-  /** Multiplicador con el que se cobró (solo en rondas `cashed_out`). */
-  cashoutMultiplier?: number;
-};
-
-const floor2 = (x: number) => Math.floor(x * 100) / 100;
+import { uniformAt } from "../fair/rng";
 
 /**
- * Punto de crash: houseEdge / (1 − r) con r uniforme en [0, 1), truncado a 2
- * decimales y acotado a [1.00, maxMultiplier].
+ * CRASH con RTP fijo. Port de `juegos-referencia/crash.js`.
  *
- * El jugador cobra a m solo si m < crashAt (ver `crashMultiplierAt`, también
- * truncado a 2 decimales), así que P(cobrar a m) = P(crashAt ≥ m + 0,01) =
- * houseEdge / (m + 0,01) y el retorno esperado es m × houseEdge / (m + 0,01),
- * siempre por debajo de houseEdge.
- *
- * Dos diferencias con el crash.js original, las dos para que eso se cumpla:
- *  - El mínimo es 1.00 y no 1.01. Con 1.01 y reloj continuo, cobrar a 1.00x
- *    nada más empezar sería una apuesta sin riesgo. Un crashAt de 1.00 es una
- *    ronda que revienta al instante (probabilidad 1 − houseEdge/1.01 ≈ 4 %).
- *  - Se trunca en vez de redondear.
- *
- * El tope: crashAt nunca pasa de `maxMultiplier`, así que la ronda revienta
- * como muy tarde ahí y nadie puede cobrar a `maxMultiplier` o más.
+ * punto = rtp / (1 − u), u uniforme en [0, 1): la probabilidad de llegar al
+ * menos a x es rtp / x, así que retirando en x se gana x con probabilidad
+ * rtp / x → ganancia esperada = rtp para CUALQUIER objetivo. El punto se
+ * redondea hacia abajo a 2 decimales y por debajo de 1.00 explota al instante;
+ * ambos detalles solo favorecen a la casa.
  */
-export function drawCrashPoint(houseEdge: number, maxMultiplier: number): number {
-  const r = randomInt(0, 2 ** 47) / 2 ** 47;
-  const raw = houseEdge / (1 - r);
-  return Math.min(Math.max(floor2(raw), 1), maxMultiplier);
+
+export type CrashConfig = { rtp: number; maxMult: number };
+
+export function crashPoint(
+  serverSeed: string,
+  clientSeed: string,
+  nonce: number | bigint | string,
+  cfg: CrashConfig
+): number {
+  const u = uniformAt(serverSeed, clientSeed, nonce, 0);
+  let p = cfg.rtp / (1 - u);
+  p = Math.floor(p * 100) / 100;
+  if (p < 1) p = 1.0;
+  if (p > cfg.maxMult) p = cfg.maxMult;
+  return p;
 }
 
-/** Multiplicador según el tiempo transcurrido, truncado a 2 decimales. */
-export function crashMultiplierAt(
-  elapsedMs: number,
-  growthPerTick: number,
-  tickMs: number
-): number {
-  return floor2(Math.pow(growthPerTick, Math.max(0, elapsedMs) / tickMs));
+/** `target` (retirada automática) debe estar entre 1.01 y `maxMult`. */
+export function playCrash(
+  input: {
+    bet: number;
+    target: number;
+    serverSeed: string;
+    clientSeed: string;
+    nonce: number | bigint | string;
+  },
+  cfg: CrashConfig
+) {
+  if (!(input.target >= 1.01 && input.target <= cfg.maxMult)) {
+    throw new Error("Objetivo fuera de límites");
+  }
+  const point = crashPoint(input.serverSeed, input.clientSeed, input.nonce, cfg);
+  const win = point >= input.target && point > 1.0;
+  return { point, win, payout: win ? Math.floor(input.bet * input.target) : 0 };
 }

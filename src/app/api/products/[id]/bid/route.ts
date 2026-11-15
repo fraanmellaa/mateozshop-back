@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { placeBidAtomic } from "@/app/utils/points";
-import { pointsErrorResponse } from "@/app/utils/products/pointsErrors";
+import { placeBid, shopBidErrorResponse } from "@/app/utils/shop/bids";
 import { publishBidUpdated, publishUserNotification } from "@/app/utils/realtime";
 import { getUserByDiscordId } from "@/app/utils/users";
+import { isResetBlocking } from "@/app/utils/economy/monthly";
 
 const bodySchema = z.object({
   discord_id: z.string().min(1),
@@ -32,13 +32,22 @@ export async function POST(
   const body = parsed.data;
 
   try {
+    // Durante el reinicio mensual no se puja ni se compra: lo gastado ahora se
+    // perdería (o quedaría retenido) al poner los saldos a cero.
+    if (await isResetBlocking()) {
+      return NextResponse.json(
+        { success: false, error: "MONTHLY_RESET_IN_PROGRESS" },
+        { status: 409 }
+      );
+    }
+
     const user = await getUserByDiscordId(body.discord_id);
     if (!user) {
       return NextResponse.json({ success: false, error: "USER_NOT_FOUND" }, { status: 404 });
     }
 
     // Retiene los puntos del pujador y devuelve los del anterior, todo atómico.
-    const bid = await placeBidAtomic(user.id, productId, body.amount);
+    const bid = await placeBid(user.id, productId, body.amount);
 
     // La puja ya es firme: un fallo de Ably no debe devolver error al pujador.
     try {
@@ -49,7 +58,7 @@ export async function POST(
         bidderImage: user.image,
         bidderId: user.id,
         minBidIncrement: bid.min_bid_increment,
-        auctionStatus: "in_progress",
+        auctionStatus: bid.auction_status,
         auctionEndsAt: bid.auction_ends_at,
       });
 
@@ -86,12 +95,15 @@ export async function POST(
           bidderImage: user.image,
           bidderId: user.id,
           balance: bid.balance,
+          auctionEndsAt: bid.auction_ends_at,
+          minNextBid: bid.min_next_bid,
+          extended: bid.extended,
         },
       },
       { status: 200 }
     );
   } catch (error) {
-    const response = pointsErrorResponse(error);
+    const response = shopBidErrorResponse(error);
     if (response) return response;
 
     console.error("Error placing bid:", error);

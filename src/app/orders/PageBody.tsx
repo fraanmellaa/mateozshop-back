@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { ColumnDef } from "@tanstack/react-table";
 import { DecoratedOrder } from "../utils/orders/types";
@@ -35,9 +35,52 @@ import {
   ColumnFiltersState,
 } from "@tanstack/react-table";
 import Image from "next/image";
+import { toast } from "sonner";
+import ReviewOrderModal from "./ReviewOrderModal";
+import { resendOrderCode, updateOrderStatus } from "../utils/orders/actions";
 
-export default function PageBody({ orders }: { orders: DecoratedOrder[] }) {
+type View = "all" | "review" | "deliveries";
+
+const DELIVERY_LABEL: Record<string, string> = {
+  code: "Código por email",
+  dm: "Mensaje privado",
+  trade: "Intercambio de Steam",
+};
+
+const isPendingReview = (o: DecoratedOrder) => o.needs_review && !o.reviewed && o.status !== 2;
+const isPendingDelivery = (o: DecoratedOrder) =>
+  o.status === 0 && !(o.needs_review && !o.reviewed);
+
+export default function PageBody({ allOrders }: { allOrders: DecoratedOrder[] }) {
   const router = useRouter();
+  const [view, setView] = useState<View>("all");
+  const [review, setReview] = useState<{ id: number; approve: boolean } | null>(null);
+
+  const orders = useMemo(
+    () =>
+      allOrders.filter((o) =>
+        view === "review" ? isPendingReview(o) : view === "deliveries" ? isPendingDelivery(o) : true
+      ),
+    [allOrders, view]
+  );
+  const reviewCount = allOrders.filter(isPendingReview).length;
+  const deliveryCount = allOrders.filter(isPendingDelivery).length;
+
+  const markDelivered = async (id: number) => {
+    const result = await updateOrderStatus(id, 1);
+    if (result.success) {
+      toast.success("Pedido marcado como entregado");
+      router.refresh();
+    } else toast.error(result.error || "Error al actualizar el pedido");
+  };
+
+  const resendCode = async (id: number) => {
+    const result = await resendOrderCode(id);
+    if (result.success) {
+      toast.success("Código reenviado");
+      router.refresh();
+    } else toast.error(result.error || "Error al reenviar el código");
+  };
   const searchParams = useSearchParams();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -119,6 +162,36 @@ export default function PageBody({ orders }: { orders: DecoratedOrder[] }) {
       ),
     },
     {
+      id: "delivery",
+      header: () => <div className="text-left">Entrega</div>,
+      cell: ({ row }) => {
+        const o = row.original;
+        return (
+          <div className="text-left text-sm">
+            <div>{DELIVERY_LABEL[o.delivery_type] ?? o.delivery_type}</div>
+            {o.delivery_type === "trade" &&
+              (o.steam_trade_url ? (
+                <a
+                  href={o.steam_trade_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-400 underline"
+                >
+                  Enlace de Steam
+                </a>
+              ) : (
+                <span className="text-red-300">Sin enlace de Steam</span>
+              ))}
+            {o.needs_review && (
+              <div className={o.reviewed ? "text-green-300" : "text-yellow-300"}>
+                {o.reviewed ? "Revisado" : "Pendiente de revisión"}
+              </div>
+            )}
+          </div>
+        );
+      },
+    },
+    {
       accessorKey: "status",
       header: () => <div className="text-left">Estado</div>,
       cell: ({ row }) => {
@@ -191,6 +264,30 @@ export default function PageBody({ orders }: { orders: DecoratedOrder[] }) {
                 Copiar ID del pedido
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              {isPendingReview(order) && (
+                <>
+                  <DropdownMenuItem onClick={() => setReview({ id: order.id, approve: true })}>
+                    Aprobar
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setReview({ id: order.id, approve: false })}
+                    className="text-red-300"
+                  >
+                    Rechazar y devolver puntos
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              {isPendingDelivery(order) && (
+                <DropdownMenuItem onClick={() => markDelivered(order.id)}>
+                  Marcar como entregado
+                </DropdownMenuItem>
+              )}
+              {order.has_code && order.status !== 2 && !isPendingReview(order) && (
+                <DropdownMenuItem onClick={() => resendCode(order.id)}>
+                  Reenviar código por email
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={() => router.push(`/orders/${order.id}`)}
                 className="flex items-center"
@@ -233,6 +330,25 @@ export default function PageBody({ orders }: { orders: DecoratedOrder[] }) {
 
   return (
     <div className="w-full">
+      <div className="flex gap-2 pt-4">
+        {(
+          [
+            ["all", "Todos", allOrders.length],
+            ["review", "Pendientes de revisión", reviewCount],
+            ["deliveries", "Entregas pendientes", deliveryCount],
+          ] as [View, string, number][]
+        ).map(([key, label, count]) => (
+          <Button
+            key={key}
+            type="button"
+            size="sm"
+            variant={view === key ? "default" : "outline"}
+            onClick={() => setView(key)}
+          >
+            {label} ({count})
+          </Button>
+        ))}
+      </div>
       <div className="flex items-center py-4 gap-4">
         <Input
           placeholder="Buscar por usuario o producto..."
@@ -328,6 +444,16 @@ export default function PageBody({ orders }: { orders: DecoratedOrder[] }) {
           </Button>
         </div>
       </div>
+      <ReviewOrderModal
+        orderId={review?.id ?? null}
+        approve={review?.approve ?? true}
+        isOpen={review !== null}
+        onClose={() => setReview(null)}
+        onDone={() => {
+          setReview(null);
+          router.refresh();
+        }}
+      />
     </div>
   );
 }

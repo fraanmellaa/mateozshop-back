@@ -25,6 +25,18 @@ const optionalText = (max: number) =>
     .nullish()
     .transform((value) => (value ? value : null));
 
+// Color #RRGGBB normalizado a mayúsculas; vacío = null.
+const optionalColor = z
+  .string()
+  .trim()
+  .nullish()
+  .transform((value, ctx) => {
+    if (!value) return null;
+    if (/^#[0-9A-Fa-f]{6}$/.test(value)) return value.toUpperCase();
+    ctx.addIssue({ code: "custom", message: "El color debe tener formato #RRGGBB" });
+    return z.NEVER;
+  });
+
 // Lista de códigos ISO alfa-2: mayúsculas, sin vacíos ni duplicados.
 const countryList = z
   .array(z.string())
@@ -52,6 +64,10 @@ export const bonusSchema = z.object({
   description: optionalText(500),
   image: optionalHttpsUrl,
   url: optionalHttpsUrl,
+  color: optionalColor,
+  button_text: optionalText(40),
+  featured: z.boolean(),
+  conditions: optionalText(300),
   countries: countryList,
   blocked_countries: countryList,
   position: z.number().int().min(-100000).max(100000),
@@ -63,6 +79,10 @@ export const createBonusSchema = bonusSchema.partial({
   description: true,
   image: true,
   url: true,
+  color: true,
+  button_text: true,
+  featured: true,
+  conditions: true,
   countries: true,
   blocked_countries: true,
   position: true,

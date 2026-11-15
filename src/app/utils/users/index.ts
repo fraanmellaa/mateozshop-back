@@ -34,6 +34,12 @@ export function toPublicUser(user: User) {
     actual_points: user.actual_points,
     kick_id: user.kick_id ?? null,
     kick_username: user.kick_username ?? null,
+    kick_linked_at: user.kick_linked_at ?? null,
+    twitch_id: user.twitch_id ?? null,
+    twitch_username: user.twitch_username ?? null,
+    twitch_linked_at: user.twitch_linked_at ?? null,
+    steam_trade_url: user.steam_trade_url ?? null,
+    adult_confirmed: Boolean(user.adult_confirmed_at),
     is_banned: Boolean(user.is_banned),
   };
 }
@@ -69,6 +75,20 @@ export const getUserByKickId = async (kickId: string) => {
     .from("users")
     .select("*")
     .eq("kick_id", kickId)
+    .limit(1);
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.[0] ? mapUserRow(data[0]) : null;
+};
+
+export const getUserByTwitchId = async (twitchId: string) => {
+  const { data, error } = await getSupabaseAdmin()
+    .from("users")
+    .select("*")
+    .eq("twitch_id", twitchId)
     .limit(1);
 
   if (error) {
@@ -133,13 +153,17 @@ export const setUserBannedStatusById = async (
  * Alta o actualización del usuario al iniciar sesión con Discord.
  * `username` es UNIQUE en BD pero el nombre visible de Discord no lo es: si
  * choca se guarda con un sufijo sacado del discord_id.
- * Lanza Error("EMAIL_ALREADY_REGISTERED") si el email ya es de otra cuenta.
+ * Lanza Error("EMAIL_ALREADY_REGISTERED") si el email ya es de otra cuenta y
+ * Error("ADULT_CONFIRMATION_REQUIRED") si es un usuario nuevo sin confirmar +18.
+ * Un usuario existente que aún no había confirmado puede hacerlo aquí.
  */
 export const createUser = async (user: {
   name: string;
   user_id: string;
   profile_picture: string;
   email: string;
+  adult_confirmed?: boolean;
+  terms_accepted?: boolean;
 }) => {
   const supabase = getSupabaseAdmin();
   const discordId = user.user_id.toString();
@@ -149,8 +173,19 @@ export const createUser = async (user: {
   ];
 
   const existing = await getUserByDiscordId(discordId);
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  if (!existing && user.adult_confirmed !== true) {
+    throw new Error("ADULT_CONFIRMATION_REQUIRED");
+  }
 
   if (existing) {
+    if (user.adult_confirmed === true && !existing.adult_confirmed_at) {
+      await confirmAdult(existing.id, user.terms_accepted === true);
+      existing.adult_confirmed_at = nowSec;
+      if (user.terms_accepted === true) existing.terms_accepted_at = nowSec;
+    }
+
     const nameChanged =
       existing.username !== user.name &&
       !fallbackNames.includes(existing.username);
@@ -192,7 +227,9 @@ export const createUser = async (user: {
         email: user.email,
         total_points: 0,
         used_points: 0,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: nowSec,
+        adult_confirmed_at: nowSec,
+        terms_accepted_at: user.terms_accepted === true ? nowSec : null,
       })
       .select("*")
       .limit(1);
@@ -239,6 +276,7 @@ export const linkKickAccount = async (
     .update({
       kick_id: kickId,
       kick_username: kickUsername,
+      kick_linked_at: Math.floor(Date.now() / 1000),
     })
     .eq("id", userId)
     .is("kick_id", null)
@@ -262,7 +300,7 @@ export const linkKickAccount = async (
 export const unlinkKickAccount = async (userId: number) => {
   const { data, error } = await getSupabaseAdmin()
     .from("users")
-    .update({ kick_id: null, kick_username: null })
+    .update({ kick_id: null, kick_username: null, kick_linked_at: null })
     .eq("id", userId)
     .select("*")
     .limit(1);
@@ -270,4 +308,107 @@ export const unlinkKickAccount = async (userId: number) => {
   if (error) throw error;
 
   return data?.[0] ? mapUserRow(data[0]) : null;
+};
+
+export type TwitchLinkErrorCode =
+  | "TWITCH_ALREADY_LINKED"
+  | "TWITCH_ACCOUNT_ALREADY_LINKED";
+
+export class TwitchLinkError extends Error {
+  code: TwitchLinkErrorCode;
+
+  constructor(code: TwitchLinkErrorCode) {
+    super(code);
+    this.name = "TwitchLinkError";
+    this.code = code;
+  }
+}
+
+/**
+ * Vincula una cuenta de Twitch (con su fecha de creación de Helix). Solo si el
+ * usuario no tiene ya una (TWITCH_ALREADY_LINKED) y esa cuenta no es de otro
+ * usuario (TWITCH_ACCOUNT_ALREADY_LINKED, por el índice único de `twitch_id`).
+ * Devuelve null si el usuario no existe.
+ */
+export const linkTwitchAccount = async (
+  userId: number,
+  twitch: { id: string; username: string; createdAt: number | null }
+) => {
+  const { data, error } = await getSupabaseAdmin()
+    .from("users")
+    .update({
+      twitch_id: twitch.id,
+      twitch_username: twitch.username,
+      twitch_created_at: twitch.createdAt,
+      twitch_linked_at: Math.floor(Date.now() / 1000),
+    })
+    .eq("id", userId)
+    .is("twitch_id", null)
+    .select("*")
+    .limit(1);
+
+  if (error) {
+    if (error.code === UNIQUE_VIOLATION) {
+      throw new TwitchLinkError("TWITCH_ACCOUNT_ALREADY_LINKED");
+    }
+    throw error;
+  }
+
+  if (data?.[0]) return mapUserRow(data[0]);
+
+  const current = await getUserById(userId);
+  if (current?.twitch_id) throw new TwitchLinkError("TWITCH_ALREADY_LINKED");
+  return null;
+};
+
+export const unlinkTwitchAccount = async (userId: number) => {
+  const { data, error } = await getSupabaseAdmin()
+    .from("users")
+    .update({
+      twitch_id: null,
+      twitch_username: null,
+      twitch_created_at: null,
+      twitch_linked_at: null,
+    })
+    .eq("id", userId)
+    .select("*")
+    .limit(1);
+
+  if (error) throw error;
+
+  return data?.[0] ? mapUserRow(data[0]) : null;
+};
+
+/** Marca al usuario como mayor de edad (y, si se indica, con los términos aceptados). */
+export const confirmAdult = async (userId: number, termsAccepted: boolean) => {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const { data, error } = await getSupabaseAdmin()
+    .from("users")
+    .update({
+      adult_confirmed_at: nowSec,
+      ...(termsAccepted ? { terms_accepted_at: nowSec } : {}),
+    })
+    .eq("id", userId)
+    .is("adult_confirmed_at", null)
+    .select("*")
+    .limit(1);
+
+  if (error) throw error;
+  if (data?.[0]) return mapUserRow(data[0]);
+
+  // Ya estaba confirmado (o no existe): se conserva la fecha original.
+  return getUserById(userId);
+};
+
+/** Cambia el nombre guardado de una plataforma (!rename: el chat trae el nombre actual). */
+export const updatePlatformUsername = async (
+  userId: number,
+  platform: "kick" | "twitch",
+  username: string
+) => {
+  const { error } = await getSupabaseAdmin()
+    .from("users")
+    .update(platform === "kick" ? { kick_username: username } : { twitch_username: username })
+    .eq("id", userId);
+  if (error) throw error;
 };

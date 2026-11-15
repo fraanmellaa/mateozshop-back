@@ -8,7 +8,8 @@ const ERROR_TTL_MS = 15_000;
 let cache: { live: boolean; expiresAt: number } | null = null;
 let inFlight: Promise<boolean> | null = null;
 
-async function fetchLiveStatus(): Promise<boolean> {
+/** Lectura directa (sin caché). Lanza si la API de Kick falla: el estado del directo distingue "no está" de "no sé". */
+export async function fetchLiveStatus(): Promise<boolean> {
   const broadcasterId = requireEnv("KICK_BROADCASTER_USER_ID");
   const token = await getAppAccessToken();
 

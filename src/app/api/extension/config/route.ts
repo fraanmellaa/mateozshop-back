@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
 
 import { requireExtensionUser } from "@/app/utils/extensionAuth";
-import { extensionErrorResponse, extensionOk } from "@/app/utils/games/http";
-import { getExtensionSettings } from "@/app/utils/settings";
+import { publicGamesConfig } from "@/app/utils/games/engine";
+import { extensionOk, gameErrorResponse } from "@/app/utils/games/http";
+import { getGamesSettings } from "@/app/utils/settings";
 import { requireEnv } from "@/lib/env";
 
 export async function GET(request: NextRequest) {
@@ -10,42 +11,29 @@ export async function GET(request: NextRequest) {
   if (!auth.ok) return auth.response;
 
   try {
-    const { watch, mines, crash, plinko } = await getExtensionSettings();
+    const settings = await getGamesSettings();
     const shop = requireEnv("FRONTEND_BASE_URL").replace(/\/+$/, "");
 
-    // Solo valores públicos: ni los pesos del Plinko ni el borde del crash.
+    // Solo valores públicos: tablas, límites y RTP. Nada de semillas.
     return extensionOk({
-      watch: {
-        intervalSeconds: watch.intervalSeconds,
-        pointsPerInterval: watch.pointsPerInterval,
-        requireLive: watch.requireLive,
-      },
-      mines: {
-        minBet: mines.minBet,
-        maxBet: mines.maxBet,
-        boardSizes: mines.boardSizes,
-        maxMinePercent: mines.maxMinePercent,
-        houseEdge: mines.houseEdge,
-        maxMultiplier: mines.maxMultiplier,
-      },
-      crash: {
-        minBet: crash.minBet,
-        maxBet: crash.maxBet,
-        maxMultiplier: crash.maxMultiplier,
-        growthPerTick: crash.growthPerTick,
-        tickMs: crash.tickMs,
-      },
-      plinko: {
-        minBet: plinko.minBet,
-        maxBet: plinko.maxBet,
-        multipliers: plinko.multipliers,
+      games: {
+        ...publicGamesConfig(settings),
+        limits: {
+          dailyWagerCap: settings.dailyWagerCap,
+          maxBalls: settings.plinko.maxBalls,
+        },
+        dailyCap: settings.dailyWagerCap,
       },
       links: {
-        linkKick: `${shop}/mi-cuenta/kick`,
         shop,
+        games: `${shop}/juegos`,
+        linkKick: `${shop}/mi-cuenta/kick`,
+        linkTwitch: `${shop}/mi-cuenta/cuentas`,
+        adult: shop,
+        fair: `${shop}/juegos#equidad`,
       },
     });
   } catch (error) {
-    return extensionErrorResponse(error);
+    return gameErrorResponse(error, "extension");
   }
 }

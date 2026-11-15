@@ -9,6 +9,18 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/cron/economy/tick",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/economy/monthly",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/tournaments",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/api/cron/tiktok/leaderboards",
       "schedule": "*/5 * * * *"
     },

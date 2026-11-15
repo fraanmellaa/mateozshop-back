@@ -2,7 +2,59 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { fetchAllRows } from "./fetchAll";
 
 // Columnas de las rutas públicas: nunca `codes`, `used_codes` ni `comments`.
-const PUBLIC_GIVEAWAY_COLUMNS = "id, cost, title, image, start_at, end_at, winner, is_closed";
+// `draw_seed` y `draw_log` se leen para revelarlos SOLO tras el sorteo.
+const PUBLIC_GIVEAWAY_COLUMNS =
+  "id, cost, title, image, start_at, end_at, winner, is_closed, rules, draw_seed_hash, draw_seed, drawn_at, draw_log";
+
+type DrawLog = {
+  n: number;
+  index: number;
+  winner_entry_id: number;
+  entry_ids: number[];
+  excluded_entry_ids: number[];
+};
+
+type PublicRow = {
+  draw_seed: string | null;
+  draw_log: DrawLog | null;
+  drawn_at: number | null;
+  rules: string | null;
+  draw_seed_hash: string | null;
+};
+
+/**
+ * Datos de verificación del sorteo. Antes del sorteo solo se publica el hash
+ * (`draw_seed` es null). Tras el sorteo se revela la semilla y la lista
+ * ORDENADA de ids de entrada usada (solo ids de entrada, sin usuarios: quién
+ * ganó ya sale en `winners`), el índice y las entradas excluidas por baneo.
+ * Verificación: sha256(draw_seed) == draw_seed_hash e
+ * índice = floor(uniformAt(draw_seed, String(id), 0, 0) * n).
+ */
+function publicDrawFields(row: PublicRow) {
+  const drawn = row.drawn_at !== null && row.draw_seed !== null;
+  return {
+    rules: row.rules ?? null,
+    draw_seed_hash: row.draw_seed_hash ?? null,
+    draw_seed: drawn ? row.draw_seed : null,
+    drawn_at: row.drawn_at ?? null,
+    draw: drawn && row.draw_log ? row.draw_log : null,
+  };
+}
+
+function stripSecrets<T extends PublicRow>(row: T) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { draw_seed, draw_log, drawn_at, rules, draw_seed_hash, ...rest } = row;
+  return rest;
+}
+
+async function countEntries(giveawayId: number) {
+  const { count, error } = await getSupabaseAdmin()
+    .from("giveaways_entries")
+    .select("id", { count: "exact", head: true })
+    .eq("giveaway_id", giveawayId);
+  if (error) throw error;
+  return count ?? 0;
+}
 
 type EntryRow = {
   user_id: number;
@@ -75,11 +127,20 @@ export const getGiveaways = async () => {
   if (error) throw error;
 
   const giveawaysData = await Promise.all(
-    (giveawaysList || []).map(async (giveaway) => ({
-      ...giveaway,
-      entries: await getGiveawayEntries(giveaway.id),
-      winners: await getGiveawayWinners(giveaway),
-    }))
+    ((giveawaysList || []) as unknown as (PublicRow & { id: number; start_at: number; end_at: number; winner: number | null })[]).map(
+      async (giveaway) => {
+        const entries = await getGiveawayEntries(giveaway.id);
+        return {
+          ...stripSecrets(giveaway),
+          ...publicDrawFields(giveaway),
+          // La lista no lleva las bases (texto largo): están en el detalle.
+          rules: undefined,
+          entries,
+          entries_count: entries.reduce((sum, e) => sum + e.tickets, 0),
+          winners: await getGiveawayWinners(giveaway),
+        };
+      }
+    )
   );
 
   return {
@@ -97,11 +158,15 @@ export const getGiveawayById = async (id: number) => {
     .limit(1);
   if (error) throw error;
 
-  const giveaway = giveawayRows?.[0];
+  const giveaway = giveawayRows?.[0] as unknown as
+    | (PublicRow & { id: number; end_at: number; winner: number | null })
+    | undefined;
   if (!giveaway) return null;
 
   return {
-    ...giveaway,
+    ...stripSecrets(giveaway),
+    ...publicDrawFields(giveaway),
+    entries_count: await countEntries(giveaway.id),
     entries: await getGiveawayEntries(giveaway.id),
     winners: await getGiveawayWinners(giveaway),
   };

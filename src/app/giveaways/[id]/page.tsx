@@ -115,6 +115,40 @@ export default async function GiveawayDetailPage({
                   </div>
                 </div>
 
+                {/* Sorteo verificable */}
+                <div className="mt-6 space-y-2 rounded-lg border p-4 text-sm">
+                  <h3 className="font-medium">Sorteo verificable</h3>
+                  <p className="break-all">
+                    <span className="text-muted-foreground">Hash (público): </span>
+                    <span className="font-mono text-xs">{giveaway.draw_seed_hash ?? "—"}</span>
+                  </p>
+                  {giveaway.drawn_at ? (
+                    <>
+                      <p className="break-all">
+                        <span className="text-muted-foreground">Semilla revelada: </span>
+                        <span className="font-mono text-xs">{giveaway.draw_seed}</span>
+                      </p>
+                      {giveaway.draw_log && (
+                        <p className="text-muted-foreground">
+                          Entradas válidas: {giveaway.draw_log.n} · índice ganador:{" "}
+                          {giveaway.draw_log.index} · entrada ganadora #
+                          {giveaway.draw_log.winner_entry_id}
+                          {giveaway.draw_log.excluded_entry_ids.length > 0 &&
+                            ` · excluidas por baneo: ${giveaway.draw_log.excluded_entry_ids.length}`}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground">La semilla se revelará al hacer el sorteo.</p>
+                  )}
+                  {giveaway.rules && (
+                    <div>
+                      <span className="text-muted-foreground">Bases:</span>
+                      <p className="mt-1 whitespace-pre-wrap">{giveaway.rules}</p>
+                    </div>
+                  )}
+                </div>
+
                 {/* Ganador */}
                 {giveaway.winners.length > 0 && (
                   <div className="mt-6 p-4 bg-green-500/20 border border-green-500/30 rounded-lg">

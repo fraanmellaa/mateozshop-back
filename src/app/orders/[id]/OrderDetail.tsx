@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { OrderDetail as OrderDetailType } from "@/app/utils/orders/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +16,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import ChangeOrderStatusModal from "./ChangeOrderStatusModal";
 import SendEmailModal from "./SendEmailModal";
+import ReviewOrderModal from "../ReviewOrderModal";
 import {
   resendOrderCode,
   sendOrderEmail,
@@ -32,7 +33,20 @@ export default function OrderDetail({ order }: OrderDetailProps) {
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
   const [currentOrder, setCurrentOrder] = useState(order);
+
+  // Tras router.refresh() llega el pedido actualizado desde el servidor.
+  useEffect(() => setCurrentOrder(order), [order]);
   const [isResendingCode, setIsResendingCode] = useState(false);
+  const [review, setReview] = useState<{ approve: boolean } | null>(null);
+
+  const pendingReview =
+    currentOrder.needs_review && !currentOrder.reviewed_at && currentOrder.status !== 2;
+  const deliveryLabel =
+    currentOrder.product.delivery_type === "code"
+      ? "Código por email"
+      : currentOrder.product.delivery_type === "trade"
+        ? "Intercambio de Steam"
+        : "Mensaje privado";
 
   const handleStatusChange = async (newStatus: number) => {
     try {
@@ -327,17 +341,86 @@ export default function OrderDetail({ order }: OrderDetailProps) {
                 <label className="text-sm font-medium text-muted-foreground">
                   Envío
                 </label>
-                <p className="text-lg text-foreground">
-                  {currentOrder.product.sendable ? (
-                    <span className="text-green-600">✓ Envío automático</span>
-                  ) : (
-                    <span className="text-gray-600">Manual</span>
-                  )}
-                </p>
+                <p className="text-lg text-foreground">{deliveryLabel}</p>
               </div>
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Entrega y revisión */}
+      <div className="bg-card rounded-lg border border-border shadow-sm p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Package className="h-5 w-5 text-muted-foreground" />
+          <h2 className="text-lg font-semibold text-foreground">Entrega y revisión</h2>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-sm font-medium text-muted-foreground">Tipo de entrega</label>
+            <p className="text-lg text-foreground">{deliveryLabel}</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-muted-foreground">Valor del premio</label>
+            <p className="text-lg text-foreground">
+              {currentOrder.product.value_eur === null ? "—" : `${currentOrder.product.value_eur} €`}
+            </p>
+          </div>
+          {currentOrder.product.delivery_type === "trade" && (
+            <div className="md:col-span-2">
+              <label className="text-sm font-medium text-muted-foreground">
+                Enlace de intercambio de Steam del ganador
+              </label>
+              {currentOrder.user.steam_trade_url ? (
+                <p className="text-sm font-mono break-all">
+                  <a
+                    href={currentOrder.user.steam_trade_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-400 underline"
+                  >
+                    {currentOrder.user.steam_trade_url}
+                  </a>
+                </p>
+              ) : (
+                <p className="text-sm text-red-300">El ganador no ha guardado su enlace de Steam.</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {currentOrder.needs_review && (
+          <div className="mt-4 p-3 bg-muted/50 rounded-md">
+            {pendingReview ? (
+              <>
+                <p className="text-sm text-yellow-300">
+                  Premio de más de la cifra de revisión: no se entrega hasta que lo apruebes.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <Button onClick={() => setReview({ approve: true })}>Aprobar</Button>
+                  <Button variant="destructive" onClick={() => setReview({ approve: false })}>
+                    Rechazar y devolver puntos
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {currentOrder.reviewed_at
+                  ? `Revisado por ${currentOrder.reviewed_by ?? "—"} el ${new Date(
+                      currentOrder.reviewed_at
+                    ).toLocaleDateString("es-ES", {
+                      year: "numeric",
+                      month: "long",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}`
+                  : "Requería revisión."}
+                {currentOrder.review_note ? ` Nota: ${currentOrder.review_note}` : ""}
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Código entregado */}
@@ -354,6 +437,12 @@ export default function OrderDetail({ order }: OrderDetailProps) {
             {currentOrder.delivered_code}
           </p>
 
+          {pendingReview && (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Código reservado: no se envía hasta aprobar el pedido.
+            </p>
+          )}
+
           {currentOrder.code_email_sent === false && (
             <div className="mt-4 p-3 bg-red-500/20 rounded-md">
               <p className="text-sm text-red-300">
@@ -367,7 +456,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
             <Button
               variant="outline"
               onClick={handleResendCode}
-              disabled={isResendingCode}
+              disabled={isResendingCode || pendingReview}
               className="flex items-center gap-2"
             >
               <Mail className="h-4 w-4" />
@@ -391,11 +480,13 @@ export default function OrderDetail({ order }: OrderDetailProps) {
             onClick={() => setIsStatusModalOpen(true)}
             variant="outline"
             className="flex items-center gap-2 h-12"
-            disabled={currentOrder.status === 2}
+            disabled={currentOrder.status === 2 || pendingReview}
             title={
               currentOrder.status === 2
                 ? "Un pedido cancelado no se puede reabrir"
-                : undefined
+                : pendingReview
+                  ? "Aprueba o rechaza primero la revisión"
+                  : undefined
             }
           >
             <Settings className="h-4 w-4" />
@@ -466,6 +557,17 @@ export default function OrderDetail({ order }: OrderDetailProps) {
       </div>
 
       {/* Modales */}
+      <ReviewOrderModal
+        orderId={currentOrder.id}
+        approve={review?.approve ?? true}
+        isOpen={review !== null}
+        onClose={() => setReview(null)}
+        onDone={() => {
+          setReview(null);
+          router.refresh();
+        }}
+      />
+
       <ChangeOrderStatusModal
         isOpen={isStatusModalOpen}
         onClose={() => setIsStatusModalOpen(false)}

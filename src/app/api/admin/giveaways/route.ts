@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { title, image, cost, start_at, end_at, sendable, codes } = body;
+    const { title, image, cost, start_at, end_at, sendable, codes, rules } = body;
 
     if (
       !title ||
@@ -52,6 +52,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (rules !== undefined && rules !== null && (typeof rules !== "string" || rules.length > 10000)) {
+      return NextResponse.json(
+        { error: "Las bases deben ser un texto de hasta 10000 caracteres" },
+        { status: 400 }
+      );
+    }
+
     const giveaway = await createGiveaway({
       title,
       image,
@@ -59,6 +66,7 @@ export async function POST(request: NextRequest) {
       start_at: parseInt(start_at),
       end_at: parseInt(end_at),
       sendable: Boolean(sendable),
+      rules: typeof rules === "string" && rules.trim() ? rules.trim() : null,
       codes: sendable
         ? codes.map((code: unknown) => String(code).trim()).filter(Boolean)
         : [],

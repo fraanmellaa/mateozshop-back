@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { fromDateTimeLocal } from "../utils/datetime";
 import { Plus, X } from "lucide-react";
 
@@ -37,6 +38,7 @@ export default function CreateGiveawayModal({
     end_time: "",
     sendable: false,
     codes: [""],
+    rules: "",
   });
   const [isLoading, setIsLoading] = useState(false);
 
@@ -80,6 +82,7 @@ export default function CreateGiveawayModal({
           start_at,
           end_at,
           sendable: formData.sendable,
+          rules: formData.rules,
           codes: formData.sendable
             ? formData.codes.filter((code) => code.trim() !== "")
             : [],
@@ -98,6 +101,7 @@ export default function CreateGiveawayModal({
           end_time: "",
           sendable: false,
           codes: [""],
+          rules: "",
         });
       } else {
         const error = await response.json();
@@ -122,6 +126,7 @@ export default function CreateGiveawayModal({
       end_time: "",
       sendable: false,
       codes: [""],
+      rules: "",
     });
     onClose();
   };
@@ -240,6 +245,25 @@ export default function CreateGiveawayModal({
               className="col-span-3"
               required
             />
+          </div>
+
+          <div className="grid grid-cols-4 items-start gap-4">
+            <Label htmlFor="rules" className="pt-2 text-right">
+              Bases
+            </Label>
+            <div className="col-span-3">
+              <Textarea
+                id="rules"
+                rows={5}
+                maxLength={10000}
+                value={formData.rules}
+                onChange={(e) => setFormData({ ...formData, rules: e.target.value })}
+                placeholder="Bases del sorteo: quién puede participar, premio, entrega..."
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Se publican con el sorteo y en las bases legales. El hash del sorteo se genera al crearlo.
+              </p>
+            </div>
           </div>
 
           {/* Campo Sendable */}

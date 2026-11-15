@@ -13,7 +13,18 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { fromDateTimeLocal } from "@/app/utils/datetime";
+
+const EMPTY_FORM = {
+  name: "",
+  description: "",
+  image: "",
+  price: "",
+  stock: "1",
+  value_eur: "",
+  delivery_type: "code",
+  requires_trade_link: false,
+  codesText: "",
+};
 
 export default function CreateProductModal({
   isOpen,
@@ -24,19 +35,7 @@ export default function CreateProductModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [formData, setFormData] = useState({
-    name: "",
-    description: "",
-    image: "",
-    price: "",
-    stock: "1",
-    is_auction: false,
-    min_bid_increment: "1",
-    auction_cooldown_seconds: "300",
-    auction_ends_at: "",
-    sendable: false,
-    codesText: "",
-  });
+  const [formData, setFormData] = useState(EMPTY_FORM);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -44,12 +43,13 @@ export default function CreateProductModal({
     setIsLoading(true);
 
     try {
-      const codes = formData.sendable
-        ? formData.codesText
-            .split("\n")
-            .map((c) => c.trim())
-            .filter(Boolean)
-        : [];
+      const codes =
+        formData.delivery_type === "code"
+          ? formData.codesText
+              .split("\n")
+              .map((c) => c.trim())
+              .filter(Boolean)
+          : [];
 
       const response = await fetch(`/api/admin/products`, {
         method: "POST",
@@ -60,18 +60,15 @@ export default function CreateProductModal({
           image: formData.image,
           price: formData.price,
           stock: formData.stock,
-          is_auction: formData.is_auction,
-          min_bid_increment: formData.min_bid_increment,
-          auction_cooldown_seconds: formData.auction_cooldown_seconds,
-          auction_ends_at: formData.auction_ends_at
-            ? fromDateTimeLocal(formData.auction_ends_at)
-            : null,
-          sendable: formData.sendable,
+          value_eur: formData.value_eur,
+          delivery_type: formData.delivery_type,
+          requires_trade_link: formData.requires_trade_link,
           codes,
         }),
       });
 
       if (response.ok) {
+        setFormData(EMPTY_FORM);
         onSuccess();
       } else {
         const err = await response.json();
@@ -86,19 +83,7 @@ export default function CreateProductModal({
   };
 
   const handleClose = () => {
-    setFormData({
-      name: "",
-      description: "",
-      image: "",
-      price: "",
-      stock: "1",
-      is_auction: false,
-      min_bid_increment: "1",
-      auction_cooldown_seconds: "300",
-      auction_ends_at: "",
-      sendable: false,
-      codesText: "",
-    });
+    setFormData(EMPTY_FORM);
     onClose();
   };
 
@@ -106,9 +91,10 @@ export default function CreateProductModal({
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>Crear Producto</DialogTitle>
+          <DialogTitle>Crear Premio</DialogTitle>
           <DialogDescription>
-            Rellena los campos para crear un producto.
+            El premio espera sin fecha de cierre hasta que alguien puje; la primera
+            puja abre la batalla.
           </DialogDescription>
         </DialogHeader>
 
@@ -118,9 +104,7 @@ export default function CreateProductModal({
             <Input
               className="col-span-3"
               value={formData.name}
-              onChange={(e) =>
-                setFormData({ ...formData, name: e.target.value })
-              }
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               required
             />
           </div>
@@ -130,9 +114,7 @@ export default function CreateProductModal({
             <Input
               className="col-span-3"
               value={formData.description}
-              onChange={(e) =>
-                setFormData({ ...formData, description: e.target.value })
-              }
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               required
             />
           </div>
@@ -143,23 +125,19 @@ export default function CreateProductModal({
               type="url"
               className="col-span-3"
               value={formData.image}
-              onChange={(e) =>
-                setFormData({ ...formData, image: e.target.value })
-              }
+              onChange={(e) => setFormData({ ...formData, image: e.target.value })}
               required
             />
           </div>
 
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">Precio</Label>
+            <Label className="text-right">Puja mínima (pts)</Label>
             <Input
               type="number"
-              min={0}
+              min={1}
               className="col-span-3"
               value={formData.price}
-              onChange={(e) =>
-                setFormData({ ...formData, price: e.target.value })
-              }
+              onChange={(e) => setFormData({ ...formData, price: e.target.value })}
               required
             />
           </div>
@@ -168,106 +146,70 @@ export default function CreateProductModal({
             <Label className="text-right">Stock</Label>
             <Input
               type="number"
-              min={0}
+              min={1}
               className="col-span-3"
               value={formData.stock}
-              onChange={(e) =>
-                setFormData({ ...formData, stock: e.target.value })
-              }
+              onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
               required
             />
           </div>
 
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">Modo Puja</Label>
-            <div className="col-span-3 flex items-center gap-2">
-              <Checkbox
-                checked={formData.is_auction}
-                onCheckedChange={(v) =>
-                  setFormData({
-                    ...formData,
-                    is_auction: Boolean(v),
-                    stock:
-                      Boolean(v) && Number(formData.stock || "0") < 1
-                        ? "1"
-                        : formData.stock,
-                  })
-                }
+            <Label className="text-right">Valor (€)</Label>
+            <div className="col-span-3">
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={formData.value_eur}
+                onChange={(e) => setFormData({ ...formData, value_eur: e.target.value })}
               />
-              <span className="text-sm">Activar subasta en tiempo real</span>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Si supera el umbral de revisión, el pedido se revisa a mano antes de entregarse.
+              </p>
             </div>
           </div>
-
-          {formData.is_auction && (
-            <>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label className="text-right">Incremento Mínimo</Label>
-                <Input
-                  type="number"
-                  min={formData.is_auction ? 1 : 0}
-                  className="col-span-3"
-                  value={formData.min_bid_increment}
-                  onChange={(e) =>
-                    setFormData({ ...formData, min_bid_increment: e.target.value })
-                  }
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label className="text-right">Cooldown (seg)</Label>
-                <Input
-                  type="number"
-                  min={10}
-                  className="col-span-3"
-                  value={formData.auction_cooldown_seconds}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      auction_cooldown_seconds: e.target.value,
-                    })
-                  }
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label className="text-right">Fin de Puja</Label>
-                <Input
-                  type="datetime-local"
-                  className="col-span-3"
-                  value={formData.auction_ends_at}
-                  onChange={(e) =>
-                    setFormData({ ...formData, auction_ends_at: e.target.value })
-                  }
-                  required
-                />
-              </div>
-            </>
-          )}
 
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">Enviable</Label>
+            <Label className="text-right">Entrega</Label>
+            <select
+              className="col-span-3 flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={formData.delivery_type}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  delivery_type: e.target.value,
+                  requires_trade_link: e.target.value === "trade" ? true : formData.requires_trade_link,
+                })
+              }
+            >
+              <option value="code">Código por email</option>
+              <option value="dm">Mensaje privado</option>
+              <option value="trade">Skin por intercambio de Steam</option>
+            </select>
+          </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right">Enlace de Steam</Label>
             <div className="col-span-3 flex items-center gap-2">
               <Checkbox
-                checked={formData.sendable}
+                checked={formData.requires_trade_link}
+                disabled={formData.delivery_type === "trade"}
                 onCheckedChange={(v) =>
-                  setFormData({ ...formData, sendable: Boolean(v) })
+                  setFormData({ ...formData, requires_trade_link: Boolean(v) })
                 }
               />
-              <span className="text-sm">¿El producto envía códigos?</span>
+              <span className="text-sm">Exigir enlace de intercambio de Steam para pujar</span>
             </div>
           </div>
 
-          {formData.sendable && (
+          {formData.delivery_type === "code" && (
             <div className="grid grid-cols-4 items-start gap-4">
               <Label className="text-right">Códigos (uno por línea)</Label>
               <textarea
                 className="col-span-3 h-32 rounded-md border p-2"
                 value={formData.codesText}
-                onChange={(e) =>
-                  setFormData({ ...formData, codesText: e.target.value })
-                }
+                onChange={(e) => setFormData({ ...formData, codesText: e.target.value })}
               />
             </div>
           )}

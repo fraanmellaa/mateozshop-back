@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { buyGiveawayTicketAtomic } from "@/app/utils/points";
+import { accountErrorResponse } from "@/app/utils/accounts";
+import { buyGiveawayTicket } from "@/app/utils/giveaways/tickets";
+import { gateErrorResponse } from "@/app/utils/lootBoxes/gates";
 import { pointsErrorResponse } from "@/app/utils/products/pointsErrors";
 import { getUserByDiscordId } from "@/app/utils/users";
+import { isResetBlocking } from "@/app/utils/economy/monthly";
 
 const bodySchema = z.object({
   discord_id: z.string().min(1),
@@ -25,19 +28,29 @@ export async function POST(
   }
 
   try {
+    // Durante el reinicio mensual no se puja ni se compra: lo gastado ahora se
+    // perdería (o quedaría retenido) al poner los saldos a cero.
+    if (await isResetBlocking()) {
+      return NextResponse.json(
+        { success: false, error: "MONTHLY_RESET_IN_PROGRESS" },
+        { status: 409 }
+      );
+    }
+
     const user = await getUserByDiscordId(parsed.data.discord_id);
     if (!user) {
       return NextResponse.json({ success: false, error: "USER_NOT_FOUND" }, { status: 404 });
     }
 
-    const result = await buyGiveawayTicketAtomic(user.id, giveawayId);
+    const result = await buyGiveawayTicket(user.id, giveawayId);
 
     return NextResponse.json(
       { success: true, data: { entry_id: result.entry_id, balance: result.balance } },
       { status: 200 }
     );
   } catch (error) {
-    const response = pointsErrorResponse(error);
+    const response =
+      accountErrorResponse(error) ?? gateErrorResponse(error) ?? pointsErrorResponse(error);
     if (response) return response;
 
     console.error("Error buying giveaway ticket:", error);

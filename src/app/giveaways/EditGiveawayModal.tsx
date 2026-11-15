@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import type { DecoratedGiveaway } from "../utils/giveaways/admin";
 import { fromDateTimeLocal, toDateTimeLocal } from "../utils/datetime";
 
@@ -37,6 +38,7 @@ export default function EditGiveawayModal({
     start_time: "",
     end_date: "",
     end_time: "",
+    rules: "",
   });
   const [isLoading, setIsLoading] = useState(false);
 
@@ -54,6 +56,7 @@ export default function EditGiveawayModal({
         start_time: startTime,
         end_date: endDate,
         end_time: endTime,
+        rules: giveaway.rules ?? "",
       });
     }
   }, [giveaway]);
@@ -84,6 +87,8 @@ export default function EditGiveawayModal({
           cost: parseInt(formData.cost),
           start_at,
           end_at,
+          // Tras el sorteo las bases quedan bloqueadas.
+          ...(giveaway.drawn_at === null ? { rules: formData.rules } : {}),
         }),
       });
 
@@ -110,13 +115,14 @@ export default function EditGiveawayModal({
       start_time: "",
       end_date: "",
       end_time: "",
+      rules: "",
     });
     onClose();
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Editar Sorteo</DialogTitle>
           <DialogDescription>Modifica los datos del sorteo.</DialogDescription>
@@ -226,6 +232,33 @@ export default function EditGiveawayModal({
               className="col-span-3"
               required
             />
+          </div>
+
+          <div className="grid grid-cols-4 items-start gap-4">
+            <Label htmlFor="rules" className="pt-2 text-right">
+              Bases
+            </Label>
+            <div className="col-span-3">
+              <Textarea
+                id="rules"
+                rows={5}
+                maxLength={10000}
+                value={formData.rules}
+                disabled={giveaway?.drawn_at !== null}
+                onChange={(e) => setFormData({ ...formData, rules: e.target.value })}
+                placeholder="Bases del sorteo: quién puede participar, premio, entrega..."
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {giveaway?.drawn_at !== null
+                  ? "El sorteo ya se hizo: las bases no se pueden cambiar."
+                  : "Se publican con el sorteo y en las bases legales."}
+              </p>
+              {giveaway?.draw_seed_hash && (
+                <p className="mt-2 break-all text-xs text-muted-foreground">
+                  Hash del sorteo (público): <span className="font-mono">{giveaway.draw_seed_hash}</span>
+                </p>
+              )}
+            </div>
           </div>
 
           <DialogFooter>

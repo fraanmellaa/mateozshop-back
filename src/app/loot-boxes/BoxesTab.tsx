@@ -96,7 +96,7 @@ export default function BoxesTab({ boxes }: { boxes: AdminBox[] }) {
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           Las cajas nacen desactivadas. Para activar una necesita un premio Común de puntos y premios
-          en cada categoría con probabilidad.
+          en cada categoría con probabilidad. Los premios agotados siguen en el sorteo y dan sus puntos de respaldo.
         </p>
         <Button onClick={() => setBoxModal({ open: true, box: null })}>
           <Plus className="mr-2 h-4 w-4" />
@@ -176,6 +176,7 @@ export default function BoxesTab({ boxes }: { boxes: AdminBox[] }) {
                       {prizes.map((p) => {
                         const total = prizes.reduce((s, x) => s + (x.is_active ? x.weight : 0), 0);
                         const share = p.is_active && total > 0 ? (p.weight / total) * 100 : 0;
+                        const soldOut = p.stock !== null && p.stock <= 0;
                         return (
                           <li
                             key={p.id}
@@ -189,8 +190,19 @@ export default function BoxesTab({ boxes }: { boxes: AdminBox[] }) {
                                 {p.kind === "points" ? `${p.points} pts` : "Objeto"} · peso {p.weight} (
                                 {share.toFixed(1)} % de su categoría) ·{" "}
                                 {p.stock === null ? "stock ilimitado" : `stock ${p.stock}`}
+                                {p.stock !== null && p.fallback_points !== null
+                                  ? ` · respaldo ${p.fallback_points} pts`
+                                  : ""}
                                 {p.is_active ? "" : " · inactivo"}
                               </span>
+                              {soldOut && (
+                                <span
+                                  className="ml-2 inline-flex items-center rounded-full bg-red-500/20 px-2 py-0.5 text-xs font-medium text-red-300"
+                                  title="Sigue en el sorteo: si sale, da sus puntos de respaldo"
+                                >
+                                  Agotado · da {p.fallback_points ?? "?"} pts
+                                </span>
+                              )}
                             </div>
                             <div className="flex gap-1">
                               <Button variant="ghost" size="sm" onClick={() => togglePrize(p)}>

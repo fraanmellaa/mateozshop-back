@@ -29,6 +29,8 @@ export type PrizeRow = {
   points: number | null;
   weight: number;
   stock: number | null;
+  /** Puntos que se dan si el premio tenía stock y se agotó. Obligatorio con stock. */
+  fallback_points: number | null;
   is_active: boolean;
   position: number;
   created_at: number;
@@ -59,6 +61,9 @@ export type PublicPrize = {
   points: number | null;
 };
 
+/** Premio entregado al abrir: con `fallback` el stock se había agotado y se pagaron puntos. */
+export type OpenedPrize = PublicPrize & { fallback: boolean };
+
 export type PublicBox = {
   id: number;
   name: string;
@@ -72,6 +77,13 @@ export type BoxOdds = {
   id: number;
   name: string;
   odds: { common: number; rare: number; epic: number; legendary: number };
+  /**
+   * Probabilidad REAL de cada premio activo, en puntos básicos (puede llevar
+   * decimales). Tiene en cuenta que una categoría sin premios activos cede su
+   * probabilidad a la inferior (como hace el sorteo) y que un premio agotado
+   * sigue saliendo (entrega sus puntos de respaldo).
+   */
+  prizes: { name: string; rarity: "common" | "rare" | "epic" | "legendary"; probability: number }[];
 };
 
 export type OpeningStatus = "completed" | "pending" | "delivered";
@@ -91,6 +103,10 @@ export type AdminOpening = {
   delivery_note: string | null;
   delivered_at: number | null;
   created_at: number;
+  fallback: boolean;
+  server_seed_hash: string | null;
+  client_seed: string | null;
+  fair_nonce: number | null;
   user: {
     username: string | null;
     email: string | null;
@@ -108,5 +124,6 @@ export type UserOpening = {
   points_awarded: number;
   status: OpeningStatus;
   delivery_note: string | null;
+  fallback: boolean;
   created_at: number;
 };

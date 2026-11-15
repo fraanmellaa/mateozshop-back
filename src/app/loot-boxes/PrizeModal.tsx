@@ -47,6 +47,7 @@ export default function PrizeModal({
     points: prize?.points != null ? String(prize.points) : "",
     weight: String(prize?.weight ?? 1),
     stock: prize?.stock != null ? String(prize.stock) : "",
+    fallback_points: prize?.fallback_points != null ? String(prize.fallback_points) : "",
     position: String(prize?.position ?? 0),
     is_active: prize?.is_active ?? true,
   });
@@ -59,7 +60,9 @@ export default function PrizeModal({
   const liveIssue =
     form.kind === "points" && !(Number(form.points) >= 1)
       ? "Un premio de puntos necesita un valor de al menos 1."
-      : !(Number(form.weight) >= 1)
+      : form.stock.trim() !== "" && !(Number(form.fallback_points) >= 1)
+        ? "Un premio con stock necesita puntos de respaldo (al menos 1)."
+        : !(Number(form.weight) >= 1)
         ? "El peso debe ser al menos 1."
         : null;
 
@@ -82,6 +85,10 @@ export default function PrizeModal({
             points: form.kind === "points" ? Number(form.points) : null,
             weight: Number(form.weight),
             stock: form.stock.trim() === "" ? null : Number(form.stock),
+            fallback_points:
+              form.stock.trim() === "" || form.fallback_points.trim() === ""
+                ? null
+                : Number(form.fallback_points),
             position: Number(form.position),
             is_active: form.is_active,
           }),
@@ -210,9 +217,28 @@ export default function PrizeModal({
                 value={form.stock}
                 onChange={(e) => setForm({ ...form, stock: e.target.value })}
               />
-              <p className="mt-1 text-xs text-muted-foreground">Vacío = ilimitado.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Vacío = ilimitado. Un premio agotado sigue pudiendo salir: entonces da sus puntos de respaldo.
+              </p>
             </div>
           </div>
+          {form.stock.trim() !== "" && (
+            <div className="grid grid-cols-4 items-start gap-4">
+              <Label className="pt-2 text-right">Puntos de respaldo</Label>
+              <div className="col-span-3">
+                <Input
+                  type="number"
+                  min={1}
+                  value={form.fallback_points}
+                  onChange={(e) => setForm({ ...form, fallback_points: e.target.value })}
+                  required
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Obligatorio con stock. Se abonan en lugar del premio cuando el stock llega a 0.
+                </p>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-4 items-center gap-4">
             <Label className="text-right">Posición</Label>
             <Input

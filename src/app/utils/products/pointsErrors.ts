@@ -18,6 +18,9 @@ const STATUS: Record<string, number> = {
   NOT_ENOUGH_POINTS: 400,
   USER_BANNED: 403,
   USER_KICK_ID_NOT_FOUND: 409,
+  USER_ACCOUNT_NOT_LINKED: 409,
+  ADULT_REQUIRED: 403,
+  ACCOUNT_TOO_NEW: 403,
   OUT_OF_STOCK: 409,
   NO_CODES_AVAILABLE: 409,
   GIVEAWAY_NOT_STARTED: 409,
@@ -32,7 +35,16 @@ const STATUS: Record<string, number> = {
  * si el error no es de negocio (el llamador responde 500).
  */
 export function pointsErrorResponse(error: unknown): NextResponse | null {
-  if (!isPointsError(error)) return null;
+  if (!isPointsError(error)) {
+    // Las funciones SQL reescritas (0024) lanzan códigos que `utils/points` no
+    // conoce: llegan como Error("Points RPC failed: CODIGO").
+    const match = error instanceof Error ? /Points RPC failed: (\w+)$/.exec(error.message) : null;
+    const code = match?.[1];
+    if (code === "USER_ACCOUNT_NOT_LINKED" || code === "ADULT_REQUIRED" || code === "ACCOUNT_TOO_NEW") {
+      return NextResponse.json({ success: false, error: code }, { status: STATUS[code] });
+    }
+    return null;
+  }
 
   // Nombre que ya usaba el front en las rutas web.
   const code = error.code === "INSUFFICIENT_POINTS" ? "NOT_ENOUGH_POINTS" : error.code;

@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/app/utils/auth";
 import { refundPoints } from "@/app/utils/points";
 import { sendCustomEmail, sendEmail } from "../email";
+import { reviewOrderCore } from "./review";
 
 const UNAUTHORIZED = { success: false as const, error: "Sesión de administrador no válida" };
 
@@ -52,7 +53,7 @@ export async function updateOrderStatus(orderId: number, status: number) {
 
     const { data: rows, error: readError } = await supabase
       .from("orders")
-      .select("id, status, user_id, product_id, total, delivered_code")
+      .select("id, status, user_id, product_id, total, delivered_code, needs_review, reviewed_at")
       .eq("id", orderId)
       .limit(1);
     if (readError) throw readError;
@@ -67,6 +68,12 @@ export async function updateOrderStatus(orderId: number, status: number) {
       return status === CANCELLED
         ? { success: true }
         : { success: false, error: "Un pedido cancelado no se puede reabrir" };
+    }
+
+    // Un premio que requiere revisión se resuelve con Aprobar/Rechazar (que además
+    // devuelve el código reservado al almacén): no se completa ni se cancela a mano.
+    if (order.needs_review && !order.reviewed_at) {
+      return { success: false, error: "El pedido está pendiente de revisión: apruébalo o recházalo primero" };
     }
 
     if (status === CANCELLED) {
@@ -130,7 +137,7 @@ export async function updateOrderStatus(orderId: number, status: number) {
 async function getOrderRecipient(orderId: number) {
   const { data: rows, error } = await getSupabaseAdmin()
     .from("orders")
-    .select("id, delivered_code, user:users!orders_user_id_fkey(email)")
+    .select("id, status, delivered_code, needs_review, reviewed_at, user:users!orders_user_id_fkey(email)")
     .eq("id", orderId)
     .limit(1);
   if (error) throw error;
@@ -142,6 +149,8 @@ async function getOrderRecipient(orderId: number) {
   return {
     email: (user?.email as string | undefined) || null,
     deliveredCode: (order.delivered_code as string | null) ?? null,
+    status: order.status as number,
+    pendingReview: Boolean(order.needs_review) && !order.reviewed_at,
   };
 }
 
@@ -189,19 +198,38 @@ export async function resendOrderCode(orderId: number) {
     const recipient = await getOrderRecipient(orderId);
     if (!recipient) return { success: false, error: "Pedido no encontrado" };
     if (!recipient.deliveredCode) return { success: false, error: "Este pedido no lleva código" };
+    if (recipient.status === 2) return { success: false, error: "El pedido está cancelado" };
+    if (recipient.pendingReview) {
+      return { success: false, error: "El pedido está pendiente de revisión: no se puede enviar el código todavía" };
+    }
     if (!recipient.email) return { success: false, error: "El usuario no tiene email" };
 
     const sent = await sendEmail(recipient.email, "PRODUCT_WITH_REWARD", recipient.deliveredCode);
 
     const { error } = await getSupabaseAdmin()
       .from("orders")
-      .update({ code_email_sent: sent })
-      .eq("id", orderId);
+      // Si el código acaba de llegar, el pedido queda entregado.
+      .update(sent && recipient.status === 0 ? { code_email_sent: true, status: 1 } : { code_email_sent: sent })
+      .eq("id", orderId)
+      .neq("status", CANCELLED);
     if (error) console.error(`Order ${orderId}: could not store email result`, error);
 
     return sent ? { success: true } : { success: false, error: "Error al enviar el email" };
   } catch (error) {
     console.error("Error resending order code:", error);
     return { success: false, error: "Error al enviar el email" };
+  }
+}
+
+/** Aprueba o rechaza un pedido que requiere revisión (rechazar devuelve los puntos). */
+export async function reviewOrder(orderId: number, approve: boolean, note: string) {
+  const admin = await requireAdmin();
+  if (!admin) return UNAUTHORIZED;
+
+  try {
+    return await reviewOrderCore(orderId, approve, note, admin.username);
+  } catch (error) {
+    console.error("Error reviewing order:", error);
+    return { success: false as const, error: "Error al revisar el pedido" };
   }
 }

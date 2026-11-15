@@ -21,6 +21,20 @@ export interface Giveaway {
   start_at: number;
   end_at: number;
   winner?: number;
+  rules: string | null;
+  draw_seed_hash: string | null;
+  /** null hasta que se hace el sorteo. */
+  draw_seed: string | null;
+  drawn_at: number | null;
+  entries_count: number;
+  /** Lista usada en el sorteo; solo existe tras el sorteo. */
+  draw: {
+    n: number;
+    index: number;
+    winner_entry_id: number;
+    entry_ids: number[];
+    excluded_entry_ids: number[];
+  } | null;
   entries: GiveawayEntry[];
   winners: GiveawayWinner[];
 }
