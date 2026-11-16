@@ -15,6 +15,7 @@ import {
   Radio,
   Swords,
   Newspaper,
+  Megaphone,
   Scale,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -89,6 +90,11 @@ const items = [
     title: "Pronósticos",
     url: "/predictions",
     icon: Newspaper,
+  },
+  {
+    title: "Novedades",
+    url: "/news",
+    icon: Megaphone,
   },
   {
     title: "Textos legales",

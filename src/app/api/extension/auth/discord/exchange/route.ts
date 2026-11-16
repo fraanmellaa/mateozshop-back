@@ -90,6 +90,10 @@ async function upsertUserFromDiscord(me: DiscordUser) {
     if (error instanceof Error && error.message === "EMAIL_ALREADY_REGISTERED") {
       throw new DiscordAuthError("EMAIL_ALREADY_REGISTERED", 409);
     }
+    // La cuenta se crea en la web, donde se confirma la mayoría de edad.
+    if (error instanceof Error && error.message === "ADULT_CONFIRMATION_REQUIRED") {
+      throw new DiscordAuthError("ADULT_CONFIRMATION_REQUIRED", 403);
+    }
     throw error;
   }
 

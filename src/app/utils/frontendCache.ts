@@ -3,6 +3,7 @@ const FRONT_CACHE_TAGS = {
   pastAuctions: "past-auctions-list",
   pastGiveaways: "past-giveaways-list",
   bonuses: "bonuses-list",
+  news: "news-list",
 } as const;
 
 export async function purgeFrontendCacheByTags(tags: string[]) {
@@ -81,4 +82,8 @@ export async function purgePastLeaderboardsCache() {
 
 export async function purgeBonusesCache() {
   return purgeFrontendCacheByTags([FRONT_CACHE_TAGS.bonuses]);
+}
+
+export async function purgeNewsCache() {
+  return purgeFrontendCacheByTags([FRONT_CACHE_TAGS.news]);
 }

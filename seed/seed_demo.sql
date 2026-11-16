@@ -1,7 +1,7 @@
 -- Datos de EJEMPLO para ver la tienda de puntos funcionando con el sistema nuevo.
 --
 -- Ejecutar a mano en el SQL editor de Supabase DESPUÉS de las migraciones
--- 0012 → 0025. Se puede ejecutar varias veces: cada fila solo se inserta si
+-- 0012 → 0027. Se puede ejecutar varias veces: cada fila solo se inserta si
 -- no existe ya otra con el mismo nombre/título.
 --
 -- Todo son valores de ejemplo: las imágenes son marcadores de posición
@@ -175,3 +175,35 @@ SELECT 'Pronóstico de ejemplo (borrar antes de publicar)',
 WHERE NOT EXISTS (
   SELECT 1 FROM predictions WHERE title = 'Pronóstico de ejemplo (borrar antes de publicar)'
 );
+
+-- ───────────────────────── novedades ─────────────────────────
+-- Tres novedades de ejemplo (publicadas; la primera, fijada) para ver
+-- /novedades. Necesita la migración 0027. Bórralas o edítalas desde el panel
+-- antes de abrir al público.
+
+INSERT INTO news (title, slug, summary, body, image, tag, link_url, link_text, pinned, is_published, published_at, created_at, updated_at)
+SELECT v.title, v.slug, v.summary, v.body, v.image, v.tag, v.link_url, v.link_text, v.pinned, true,
+       extract(epoch FROM now() - v.age)::integer,
+       extract(epoch FROM now() - v.age)::integer,
+       extract(epoch FROM now())::integer
+FROM (VALUES
+  ('¡Estrenamos la nueva tienda de puntos!',
+   'estrenamos-la-nueva-tienda-de-puntos',
+   'Premios por pujas, cajas y más formas de ganar puntos viendo el directo.',
+   E'La tienda de puntos se renueva.\n\nA partir de ahora los premios se consiguen por pujas: la primera puja abre una batalla de 30 minutos y gana quien más puntos ofrezca. Si te superan, recuperas tus puntos al instante.\n\nRecuerda: los puntos se ganan escribiendo en el chat durante el directo y se reinician el día 1 de cada mes.',
+   'https://placehold.co/1200x675/131924/ffb020/png?text=Nueva+tienda',
+   'Tienda', '/puntos', 'Ir a la tienda', true, interval '2 hours'),
+  ('Sorteo especial de fin de mes',
+   'sorteo-especial-de-fin-de-mes',
+   'Gasta tus puntos en tickets antes del reinicio mensual.',
+   E'Antes de que los puntos se reinicien, abrimos un sorteo especial.\n\nCada ticket cuesta puntos y el ganador se elige de forma verificable: el hash de la semilla está publicado desde el inicio.',
+   'https://placehold.co/1200x675/131924/8b5cf6/png?text=Sorteo',
+   'Evento', '/sorteos', 'Ver sorteos', false, interval '2 days'),
+  ('Cambio de horario de los directos',
+   'cambio-de-horario-de-los-directos',
+   'Esta semana los directos empiezan una hora más tarde.',
+   E'Aviso rápido: esta semana los directos empiezan una hora más tarde de lo habitual.\n\nLa racha no se pierde: cuenta cualquier día de directo en el que escribas durante al menos 20 minutos.',
+   NULL,
+   'Aviso', NULL, NULL, false, interval '5 days')
+) AS v(title, slug, summary, body, image, tag, link_url, link_text, pinned, age)
+WHERE NOT EXISTS (SELECT 1 FROM news n WHERE n.slug = v.slug);

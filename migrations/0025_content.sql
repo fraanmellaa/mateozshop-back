@@ -79,9 +79,9 @@ Contacto y reclamaciones. Puedes escribirnos a info@soymateoz.com o por correo p
 
 Qué es Mateoz Shop. Es una web de entretenimiento con un sistema gratuito de puntos para la comunidad de Mateoz. No es un casino ni un operador de juego, y no gestiona apuestas ni dinero de los usuarios.
 
-Publicidad y enlaces de afiliado. La sección de bonos es publicidad. Sus enlaces son de afiliado: si te registras en un casino a través de ellos, Chimuelo SL puede recibir una comisión, sin coste para ti. Los casinos que se muestran a los usuarios de España tienen licencia en España (DGOJ). Cada oferta pertenece al casino que la publica y está sujeta a las condiciones que figuran en su web. No recibimos datos de tu cuenta de casino.
+Publicidad y enlaces de afiliado. La sección de bonos es publicidad. Sus enlaces son de afiliado: si te registras en un casino a través de ellos, Chimuelo SL puede recibir una comisión, sin coste para ti. Los casinos que se muestran a los usuarios de España tienen licencia en España (DGOJ). Cada oferta pertenece al casino que la publica y está sujeta a las condiciones que figuran en su web. Los casinos no nos facilitan datos de tu cuenta.
 
-Última actualización: 14 de noviembre de 2026.$legal$, extract(epoch FROM now())::integer),
+Última actualización: 16 de noviembre de 2026.$legal$, extract(epoch FROM now())::integer),
   ('terminos', 'Términos y condiciones', $legal$1. Aceptación. Al crear una cuenta en Mateoz Shop aceptas estos términos.
 
 2. Quién puede participar. Solo personas mayores de 18 años. Se permite una única cuenta por persona.
@@ -92,7 +92,7 @@ Publicidad y enlaces de afiliado. La sección de bonos es publicidad. Sus enlace
 
 5. Cajas, Crash y Plinko. Son juegos gratuitos de entretenimiento en los que solo se utilizan puntos. No son sorteos ni apuestas: no cuestan dinero y en ellos no se juega ni se gana dinero.
 
-6. Premios. Los premios disponibles son los que aparecen en la web en cada momento y no se pueden cambiar por dinero. Antes de entregarlos podemos pedirte que acredites tu identidad y tu mayoría de edad. La entrega se realiza en un plazo máximo de 30 días. Los impuestos que, en su caso, correspondan al ganador en su país son a su cargo.
+6. Premios. Los premios disponibles son los que aparecen en la web en cada momento y no se pueden cambiar por dinero. Antes de entregarlos podemos pedirte que acredites tu identidad y tu mayoría de edad. La entrega se realiza en un plazo máximo de 30 días. Si el premio lo entrega un tercero, como las tiradas de un casino, se aplican además las condiciones de ese tercero. Los impuestos que, en su caso, correspondan al ganador en su país son a su cargo.
 
 7. Uso indebido. Está prohibido usar bots o varias cuentas y manipular de cualquier forma los puntos, las pujas o los juegos. Si ocurre, podemos retirar los puntos y los premios y cerrar la cuenta. Puedes reclamar la decisión en info@soymateoz.com.
 
@@ -102,7 +102,7 @@ Publicidad y enlaces de afiliado. La sección de bonos es publicidad. Sus enlace
 
 10. Ley aplicable. Estos términos se rigen por la ley de Andorra. Si eres consumidor, conservas la protección de las normas imperativas de tu país de residencia y puedes reclamar ante los tribunales de tu domicilio.
 
-Última actualización: 14 de noviembre de 2026.$legal$, extract(epoch FROM now())::integer),
+Última actualización: 16 de noviembre de 2026.$legal$, extract(epoch FROM now())::integer),
   ('privacidad', 'Política de privacidad', $legal$Responsable. Chimuelo SL, con los datos que figuran en el aviso legal. Contacto: info@soymateoz.com.
 
 Datos que tratamos. Cuando inicias sesión con Discord, Kick o Twitch recibimos tu identificador, tu nombre de usuario, tu avatar y, si lo autorizas, tu correo electrónico. También guardamos tu país, el tiempo que ves los directos y tu actividad en el chat, tus puntos, pujas, cajas y jugadas, tu dirección IP y datos técnicos de tu dispositivo. Si ganas un premio, tratamos además los datos necesarios para entregártelo y comprobar tu edad. Tu nombre de usuario y tus puntos pueden mostrarse en la clasificación.
@@ -120,12 +120,12 @@ Conservación. Conservamos tus datos mientras mantengas la cuenta. Cuando la das
 
 Tus derechos. Puedes ejercer tus derechos de acceso, rectificación, supresión, oposición, limitación y portabilidad, y retirar tu consentimiento, escribiendo a info@soymateoz.com. Respondemos en el plazo de un mes. También puedes reclamar ante la Agència Andorrana de Protecció de Dades (apda.ad) o ante la autoridad de tu país; en España, la Agencia Española de Protección de Datos (aepd.es).
 
-Última actualización: 14 de noviembre de 2026.$legal$, extract(epoch FROM now())::integer),
+Última actualización: 16 de noviembre de 2026.$legal$, extract(epoch FROM now())::integer),
   ('cookies', 'Política de cookies', $legal$Utilizamos cookies técnicas, necesarias para iniciar sesión y recordar tus preferencias. Las cookies de analítica y el reproductor de Kick o Twitch solo se cargan si las aceptas.
 
 Puedes aceptarlas o rechazarlas con la misma facilidad en el aviso de cookies, y cambiar tu elección en cualquier momento desde el pie de la web.
 
-Última actualización: 14 de noviembre de 2026.$legal$, extract(epoch FROM now())::integer),
+Última actualización: 16 de noviembre de 2026.$legal$, extract(epoch FROM now())::integer),
   ('juego-responsable', 'Juego responsable', $legal$Solo para mayores de 18 años. La ludopatía es un riesgo del juego.
 
 Esta web enlaza a casinos online en los que se juega con dinero real. Si eres menor de edad, no continúes.

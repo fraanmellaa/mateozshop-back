@@ -42,13 +42,20 @@ export async function PUT(request: NextRequest, { params }: Params) {
     );
   }
 
-  const overlap = countryListsOverlap(parsed.data);
+  // Solo se tocan los campos enviados: zod rellena con null los opcionales
+  // ausentes y, sin este filtro, una edición parcial (publicar, activar) los borraría.
+  const sent = new Set(Object.keys((body ?? {}) as object));
+  const changes = Object.fromEntries(
+    Object.entries(parsed.data).filter(([key]) => sent.has(key))
+  ) as typeof parsed.data;
+
+  const overlap = countryListsOverlap(changes);
   if (overlap) {
     return NextResponse.json({ success: false, error: overlap }, { status: 400 });
   }
 
   try {
-    const bonus = await updateBonus(id, parsed.data);
+    const bonus = await updateBonus(id, changes);
     if (!bonus) return notFound();
     await purgeBonusesCache().catch(() => null);
     return NextResponse.json({ success: true, data: bonus });

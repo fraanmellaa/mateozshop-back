@@ -32,8 +32,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
     );
   }
 
+  // Solo se tocan los campos enviados: zod rellena con null los opcionales
+  // ausentes y, sin este filtro, una edición parcial (publicar, activar) los borraría.
+  const sent = new Set(Object.keys((body ?? {}) as object));
+  const changes = Object.fromEntries(
+    Object.entries(parsed.data).filter(([key]) => sent.has(key))
+  ) as typeof parsed.data;
+
   try {
-    const prediction = await updatePrediction(id, parsed.data);
+    const prediction = await updatePrediction(id, changes);
     if (!prediction) return notFound();
     return NextResponse.json({ success: true, data: prediction });
   } catch (error) {

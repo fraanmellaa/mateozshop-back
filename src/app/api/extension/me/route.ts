@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { requireExtensionUser } from "@/app/utils/extensionAuth";
 import { extensionOk, gameErrorResponse } from "@/app/utils/games/http";
 import { UserEconomy, getUserEconomy } from "@/app/utils/economy/user";
+import { getLivePlatforms } from "@/app/utils/live/status";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export async function GET(request: NextRequest) {
@@ -28,6 +29,9 @@ export async function GET(request: NextRequest) {
       console.error("Extension me: economy unavailable:", economyError);
     }
 
+    // Directo real en cada plataforma (con caché); nunca lanza.
+    const platforms = await getLivePlatforms().catch(() => null);
+
     return extensionOk({
       web: {
         id: user.id,
@@ -52,13 +56,29 @@ export async function GET(request: NextRequest) {
       },
       streak: {
         current: economy.streak?.current ?? 0,
+        best: economy.streak?.best ?? 0,
         multiplierPct: economy.watch?.multiplierPct ?? 0,
         minutesToday: economy.streak?.minutesToday ?? 0,
         qualifiedToday: Boolean(economy.streak?.qualifiedToday),
       },
       live: {
-        kick: Boolean(economy.watch?.live?.kick),
-        twitch: Boolean(economy.watch?.live?.twitch),
+        kick: Boolean(platforms?.kick || economy.watch?.live?.kick),
+        twitch: Boolean(platforms?.twitch || economy.watch?.live?.twitch),
+      },
+      // Cajas gratis: mismo estado que ve la web (solo lectura).
+      boxes: {
+        daily: {
+          available: Boolean(economy.dailyBox?.available),
+          claimedToday: Boolean(economy.dailyBox?.claimedToday),
+          minutesNeeded: economy.dailyBox?.minutesNeeded ?? 0,
+          minutesToday: economy.dailyBox?.minutesToday ?? 0,
+          tiers: economy.dailyBox?.tiers ?? [],
+        },
+        streak: {
+          available: economy.streakBox?.available ?? 0,
+          everyDays: economy.streakBox?.everyDays ?? 0,
+          tiers: economy.streakBox?.tiers ?? [],
+        },
       },
     });
   } catch (error) {
