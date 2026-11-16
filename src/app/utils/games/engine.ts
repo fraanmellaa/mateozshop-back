@@ -8,18 +8,23 @@ import {
 } from "@/app/utils/settings/schema";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
-import { playCrash } from "./crash";
+import { CRASH_GROWTH_PER_SEC } from "./crash";
+import { crashSettleIfDue } from "./crashRound";
 import { GameError, dbError } from "./errors";
+import { currentMinesRound, hasActiveMinesRound, publicMinesConfig } from "./minesRounds";
 import { playMany } from "./plinko";
 import { PLINKO_LEVEL_IDS, PlinkoLevelId } from "./table";
 
 /**
- * Motor único de Crash y Plinko para la web y la extensión. Orden de cada
- * jugada: validar petición y estado (usuario, baneo, +18, rango, saldo, tope)
- * → reservar nonces (`fairReserve`, atómico) → calcular resultados en memoria
- * → liquidar TODO en una función SQL atómica (`games_settle`), que vuelve a
- * comprobar saldo y tope bajo bloqueo del usuario. La semilla secreta de
- * servidor solo vive aquí, en memoria, y nunca sale en una respuesta.
+ * Motor único de Crash y Plinko (solo se juega desde la extensión). Sin tope
+ * diario: los límites son la apuesta mínima y máxima, el multiplicador máximo,
+ * el +18, el baneo y el saldo.
+ *
+ * Plinko: validar → reservar nonces (`fairReserve`, atómico) → calcular en
+ * memoria → liquidar TODO en una función SQL atómica (`games_settle`).
+ * Crash: ronda compartida por todos, en `crashRound.ts` (razonamiento en `crash.ts`).
+ * La semilla secreta de servidor solo vive aquí, en memoria, y nunca sale en
+ * una respuesta; el punto de explosión tampoco mientras la ronda esté activa.
  */
 
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
@@ -52,40 +57,27 @@ async function loadPlayer(userId: number): Promise<Player> {
   };
 }
 
-const wageredToday = (userId: number) =>
-  rpc<number>("games_wagered_today", { p_user_id: userId });
-
 /** Comprobaciones previas a reservar nonce. La liquidación las repite bajo bloqueo. */
-async function precheck(userId: number, totalBet: number, settings: GamesSettings) {
+async function precheck(userId: number, totalBet: number) {
   const player = await loadPlayer(userId);
   if (player.isBanned) throw new GameError("USER_BANNED", 403);
   assertAdult({ adult_confirmed_at: player.adultConfirmedAt });
   if (player.points < totalBet) throw new GameError("INSUFFICIENT_POINTS", 400);
-
-  const wagered = await wageredToday(userId);
-  if (wagered + totalBet > settings.dailyWagerCap) {
-    throw new GameError("DAILY_CAP_REACHED", 409, {
-      remaining: Math.max(settings.dailyWagerCap - wagered, 0),
-    });
-  }
 }
 
 type RoundInput = { bet: number; payout: number; nonce: number; result: Record<string, unknown> };
-type Settled = { balance: number; wagered_today: number; round_ids: string[] };
+type Settled = { balance: number; round_ids: string[] };
 
-function settle(
+function settlePlinko(
   userId: number,
-  game: "crash" | "plinko",
   reservation: { server_seed_hash: string; client_seed: string; nonce_start: number },
-  rounds: RoundInput[],
-  settings: GamesSettings
+  rounds: RoundInput[]
 ) {
   return rpc<Settled>("games_settle", {
     p_user_id: userId,
-    p_game: game,
+    p_game: "plinko",
     // Único por reserva de nonces: reintentar la misma liquidación no cobra dos veces.
     p_request_id: `${userId}:${reservation.server_seed_hash.slice(0, 16)}:${reservation.nonce_start}`,
-    p_daily_cap: settings.dailyWagerCap,
     p_server_seed_hash: reservation.server_seed_hash,
     p_client_seed: reservation.client_seed,
     p_rounds: rounds,
@@ -111,6 +103,8 @@ export function publicGamesConfig(settings: GamesSettings) {
       maxBet: settings.crash.maxBet,
       maxMult: settings.crash.maxMult,
       rtp: settings.crash.rtp,
+      // k de la curva m(t) = e^(k·t); cada ronda lleva además la suya.
+      growth: CRASH_GROWTH_PER_SEC,
     },
     plinko: {
       minBet: settings.plinko.minBet,
@@ -118,26 +112,21 @@ export function publicGamesConfig(settings: GamesSettings) {
       maxBalls: settings.plinko.maxBalls,
       levels,
     },
+    mines: publicMinesConfig(settings),
   };
 }
 
 export async function getGamesState(userId: number) {
   const settings = await getGamesSettings();
-  const [player, wagered, fair] = await Promise.all([
-    loadPlayer(userId),
-    wageredToday(userId),
-    fairState(userId),
-  ]);
+  // Primero el ciclo de Crash: si la ronda ya explotó se liquida aquí y el saldo ya lo refleja.
+  await crashSettleIfDue();
+  const [player, fair] = await Promise.all([loadPlayer(userId), fairState(userId)]);
   return {
     points: player.points,
-    wageredToday: wagered,
-    dailyCap: settings.dailyWagerCap,
     fair,
-    limits: {
-      dailyWagerCap: settings.dailyWagerCap,
-      remainingToday: Math.max(settings.dailyWagerCap - wagered, 0),
-      maxBalls: settings.plinko.maxBalls,
-    },
+    limits: { maxBalls: settings.plinko.maxBalls },
+    // Partida de Buscaminas en curso (sin las minas) para retomarla; null si no hay.
+    minesRound: await currentMinesRound(userId),
     ...publicGamesConfig(settings),
   };
 }
@@ -147,47 +136,6 @@ function checkBet(bet: unknown, min: number, max: number): number {
     throw new GameError("BET_OUT_OF_RANGE", 400, { min, max });
   }
   return bet;
-}
-
-export async function playCrashRound(userId: number, input: { bet: unknown; target: unknown }) {
-  const settings = await getGamesSettings();
-  const cfg = settings.crash;
-
-  const bet = checkBet(input.bet, cfg.minBet, cfg.maxBet);
-  if (typeof input.target !== "number" || !Number.isFinite(input.target)) {
-    throw new GameError("INVALID_TARGET", 400);
-  }
-  // El objetivo se normaliza a 2 decimales (igual que el punto de caída).
-  const target = Math.round(input.target * 100) / 100;
-  if (!(target >= 1.01 && target <= cfg.maxMult)) {
-    throw new GameError("INVALID_TARGET", 400, { min: 1.01, max: cfg.maxMult });
-  }
-
-  await precheck(userId, bet, settings);
-
-  const reservation = await fairReserve(userId, 1);
-  const nonce = reservation.nonce_start;
-  const r = playCrash(
-    { bet, target, serverSeed: reservation.server_seed, clientSeed: reservation.client_seed, nonce },
-    cfg
-  );
-
-  const settled = await settle(
-    userId,
-    "crash",
-    reservation,
-    [{ bet, payout: r.payout, nonce, result: { point: r.point, target, win: r.win } }],
-    settings
-  );
-
-  return {
-    point: r.point,
-    win: r.win,
-    payout: r.payout,
-    points: settled.balance,
-    round: { id: settled.round_ids[0], nonce },
-    fair: nextFair(reservation, nonce + 1),
-  };
 }
 
 export async function playPlinkoRounds(
@@ -209,7 +157,7 @@ export async function playPlinkoRounds(
     throw new GameError("INVALID_COUNT", 400, { min: 1, max: cfg.maxBalls });
   }
 
-  await precheck(userId, bet * count, settings);
+  await precheck(userId, bet * count);
 
   const { table } = plinkoTable(settings, risk);
   const reservation = await fairReserve(userId, count);
@@ -223,17 +171,15 @@ export async function playPlinkoRounds(
     maxBalls: cfg.maxBalls,
   });
 
-  const settled = await settle(
+  const settled = await settlePlinko(
     userId,
-    "plinko",
     reservation,
     played.balls.map((b, i) => ({
       bet,
       payout: b.payout,
       nonce: reservation.nonce_start + i,
       result: { risk, path: b.path, slot: b.slot, mult: b.mult },
-    })),
-    settings
+    }))
   );
 
   return {
@@ -262,6 +208,10 @@ async function fairCall<T>(fn: string, call: () => Promise<T>): Promise<T> {
     if (error instanceof Error && error.message === "INVALID_CLIENT_SEED") {
       throw new GameError("INVALID_CLIENT_SEED", 400);
     }
+    // No se rota (= revela) la semilla con una partida en curso que dependa de ella.
+    if (error instanceof Error && error.message === "ROUND_ACTIVE") {
+      throw new GameError("ROUND_ACTIVE", 409);
+    }
     console.error(`${fn} failed:`, error instanceof Error ? error.message : "unknown");
     throw error;
   }
@@ -275,6 +225,8 @@ export async function setClientSeed(userId: number, clientSeed: unknown) {
 /** Rota la semilla de servidor: revela la anterior (para verificar) y empieza otra. */
 export async function rotateSeed(userId: number, clientSeed: unknown) {
   const seed = clientSeed === undefined || clientSeed === null ? undefined : checkClientSeed(clientSeed);
+  // Tampoco con una partida de Buscaminas activa: revelaría sus minas (0030).
+  if (await hasActiveMinesRound(userId)) throw new GameError("ROUND_ACTIVE", 409, { game: "mines" });
   const result = await fairCall("fair_rotate", () => fairRotate(userId, seed));
   return { revealed: result.revealed, fair: result.current };
 }
@@ -288,7 +240,9 @@ export async function getRoundHistory(userId: number) {
     .from("game_rounds")
     .select("id, game, bet, payout, nonce, client_seed, server_seed_hash, result, created_at")
     .eq("user_id", userId)
-    .in("game", ["crash", "plinko"])
+    .in("game", ["crash", "plinko", "mines"])
+    // Solo rondas liquidadas (las de Crash son las antiguas, de antes de la ronda compartida).
+    .in("status", ["won", "lost"])
     .not("nonce", "is", null)
     .order("created_at", { ascending: false })
     .order("nonce", { ascending: false })

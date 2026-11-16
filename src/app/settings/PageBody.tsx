@@ -15,6 +15,7 @@ import {
   settingsIssues,
 } from "@/app/utils/settings/schema";
 import { OUTER_LEN, PLINKO_LEVEL_IDS, PlinkoLevelId, buildTable, rtpOf } from "@/app/utils/games/table";
+import { MINES_DEFAULT, minesRealRtp, minesTableCents } from "@/app/utils/games/minesTable";
 
 type FieldKind = "number" | "list" | "text";
 type Field = { path: string; label: string; kind: FieldKind; help?: string };
@@ -42,7 +43,7 @@ const levelFields = (id: PlinkoLevelId): Field[] => [
   },
 ];
 
-const SECTIONS: { title: string; description: string; fields: Field[]; level?: PlinkoLevelId }[] = [
+const SECTIONS: { title: string; description: string; fields: Field[]; level?: PlinkoLevelId; mines?: boolean }[] = [
   {
     title: "Crash",
     description:
@@ -70,16 +71,16 @@ const SECTIONS: { title: string; description: string; fields: Field[]; level?: P
     level: id,
   })),
   {
-    title: "Tope diario",
-    description: "Máximo de puntos apostados al día por usuario, sumando Crash y Plinko (día de Andorra).",
+    title: "Buscaminas",
+    description:
+      "Tablero de 25 casillas y de 1 a 24 minas. El multiplicador tras k casillas seguras es RTP × C(25,k) / C(25−minas,k), truncado a 2 decimales: plantarse en cualquier momento devuelve como mucho el RTP. Al llegar al multiplicador máximo se cobra sola.",
     fields: [
-      {
-        path: "dailyWagerCap",
-        label: "Tope diario (puntos)",
-        kind: "number",
-        help: "0 cierra los juegos (nadie puede apostar).",
-      },
+      { path: "mines.rtp", label: "RTP", kind: "number", help: "Entre 0 y 0.99." },
+      { path: "mines.maxMult", label: "Multiplicador máximo", kind: "number" },
+      { path: "mines.minBet", label: "Apuesta mínima", kind: "number" },
+      { path: "mines.maxBet", label: "Apuesta máxima", kind: "number" },
     ],
+    mines: true,
   },
   {
     title: "Torneo semanal",
@@ -135,6 +136,15 @@ function fromForm(form: Record<string, string>) {
     setPath(out, path, kind === "list" ? toList(text) : kind === "text" ? text.trim() : toNumber(text));
   }
   return out;
+}
+
+/** Tabla de ejemplo (3 minas) con el RTP y el máximo del formulario. */
+function minesPreview(form: Record<string, string>) {
+  const rtp = toNumber(form["mines.rtp"]);
+  const maxMult = toNumber(form["mines.maxMult"]);
+  if (!(rtp > 0 && rtp <= 1) || !(maxMult >= 1.01)) return null;
+  const table = minesTableCents(MINES_DEFAULT, rtp, maxMult);
+  return { table: table.map((c) => (c / 100).toFixed(2)), real: minesRealRtp(MINES_DEFAULT, table) };
 }
 
 function levelPreview(form: Record<string, string>, id: PlinkoLevelId) {
@@ -265,6 +275,28 @@ export default function PageBody({
                         </p>
                       </>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {section.mines && (
+                <div className="grid grid-cols-4 items-start gap-4">
+                  <Label className="pt-0.5 text-right">Tabla con {MINES_DEFAULT} minas</Label>
+                  <div className="col-span-3 text-sm">
+                    {(() => {
+                      const mines = minesPreview(form);
+                      if (mines === null) {
+                        return <span className="text-muted-foreground">Introduce un RTP y un multiplicador máximo.</span>;
+                      }
+                      return (
+                        <>
+                          <span className="font-medium">RTP real máximo: {(mines.real * 100).toFixed(2)} %</span>
+                          <p className="mt-1 break-words text-xs text-muted-foreground">
+                            Tras 1, 2, 3… casillas seguras: {mines.table.join(" · ")}
+                          </p>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               )}

@@ -81,7 +81,13 @@ export async function gameRoute<B = undefined>(
 
 // Esquemas de cuerpo. La validación fina (rangos, riesgo, número de bolas) la
 // hace el motor, con su código de error propio.
-export const crashBody = z.object({ bet: z.unknown(), target: z.unknown() });
+export const crashBetBody = z.object({
+  roundId: z.unknown(),
+  bet: z.unknown(),
+  autoCashout: z.unknown().optional(),
+  requestId: z.unknown(),
+});
+export const crashRoundBody = z.object({ roundId: z.unknown() });
 export const plinkoBody = z.object({ bet: z.unknown(), risk: z.unknown(), count: z.unknown().optional() });
 export const clientSeedBody = z.object({ client_seed: z.unknown() });
 export const rotateBody = z.object({ client_seed: z.unknown().optional() });

@@ -36,6 +36,21 @@ const crashSchema = z
     path: ["maxMult"],
   });
 
+// Buscaminas: la tabla sale de RTP × C(25,k)/C(25−m,k) truncado hacia abajo, así
+// que con RTP ≤ 0.99 ninguna combinación de minas y parada devuelve más.
+const minesSchema = z
+  .object({
+    rtp,
+    maxMult: z.number().min(1.01).max(100_000),
+    minBet: bet,
+    maxBet: bet,
+  })
+  .refine((v) => v.minBet <= v.maxBet, betRangeError("minBet"))
+  .refine((v) => v.maxBet * v.maxMult <= MAX_PAYOUT_PER_REQUEST, {
+    message: "Apuesta máxima × multiplicador máximo es demasiado grande",
+    path: ["maxMult"],
+  });
+
 const levelSchema = z.object({
   outer: z
     .array(z.number().min(0).max(100_000))
@@ -94,11 +109,12 @@ const tournamentSchema = z.object({
   chipsPerSpin: z.number().int().min(1).max(1_000_000),
 });
 
+// Sin tope diario: un `dailyWagerCap` antiguo guardado en `app_settings` se
+// ignora al leer (z.object descarta las claves que no conoce).
 export const gamesSettingsSchema = z.object({
   crash: crashSchema,
   plinko: plinkoSchema,
-  /** Máximo apostado al día por usuario (Crash + Plinko). 0 = los juegos quedan cerrados. */
-  dailyWagerCap: z.number().int().min(0).max(1_000_000_000),
+  mines: minesSchema,
   tournament: tournamentSchema,
 });
 
@@ -117,7 +133,7 @@ export const DEFAULT_GAMES_SETTINGS: GamesSettings = {
       extreme: { outer: [10000, 250, 25, 5, 1, 0.5], rtp: 0.8, maxBet: 100 },
     },
   },
-  dailyWagerCap: 10_000,
+  mines: { rtp: 0.9, maxMult: 1000, minBet: 10, maxBet: 1000 },
   tournament: { level: "medio", spinsPerEntry: 1000, chipsPerSpin: 100 },
 };
 

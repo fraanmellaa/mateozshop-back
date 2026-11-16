@@ -24,11 +24,7 @@ export async function GET(request: NextRequest) {
     return extensionOk({
       games: {
         ...publicGamesConfig(settings),
-        limits: {
-          dailyWagerCap: settings.dailyWagerCap,
-          maxBalls: settings.plinko.maxBalls,
-        },
-        dailyCap: settings.dailyWagerCap,
+        limits: { maxBalls: settings.plinko.maxBalls },
       },
       links: {
         shop,

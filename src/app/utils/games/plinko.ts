@@ -27,7 +27,7 @@ export function playBall(input: {
 
 /**
  * Varias bolas (turbo / autoplay): cada una usa su propio nonce, empezando en
- * `nonceStart`. Quien llama comprueba ANTES saldo, tope diario y `maxBalls`.
+ * `nonceStart`. Quien llama comprueba ANTES saldo y `maxBalls`.
  */
 export function playMany(input: {
   bet: number;
