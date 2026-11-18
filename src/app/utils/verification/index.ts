@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import sharp from "sharp";
+
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { VipUnavailableError } from "@/app/utils/points/vip";
 import { isMissingColumn, isMissingVipSchema } from "@/app/utils/products/currency";
@@ -12,8 +14,10 @@ import { isMissingColumn, isMissingVipSchema } from "@/app/utils/products/curren
  * Aprobar marca `users.is_verified` y cuenta un casino más para su tramo de
  * puntos VIP (1 casino, 2, o 3 o más).
  *
- * Las capturas viven en un bucket PRIVADO y solo mientras la solicitud está
- * pendiente: se borran al aprobar o rechazar. Lo único que queda guardado es
+ * Las capturas (hasta 3 MB cada una) se suben de una en una, se convierten a
+ * WebP y quedan como borrador del usuario hasta que envía la solicitud. Viven
+ * en un bucket PRIVADO y solo mientras la solicitud está pendiente: se borran
+ * al aprobar o rechazar. Lo único que queda guardado es
  * casino, usuario del casino, estado y fecha (el importe no se guarda nunca),
  * más la huella (SHA-256) de cada captura, que se conserva aunque la imagen se
  * borre: si otra cuenta sube la misma imagen, el panel lo avisa (migración 0035).
@@ -42,7 +46,8 @@ export type VerificationErrorCode =
   | "REQUEST_PENDING"
   | "CASINO_ALREADY_VERIFIED"
   | "CASINO_USER_TAKEN"
-  | "REQUEST_NOT_FOUND";
+  | "REQUEST_NOT_FOUND"
+  | "PROOF_REQUIRED";
 
 const CODES = new Set<string>([
   "INVALID_REQUEST",
@@ -52,6 +57,7 @@ const CODES = new Set<string>([
   "CASINO_ALREADY_VERIFIED",
   "CASINO_USER_TAKEN",
   "REQUEST_NOT_FOUND",
+  "PROOF_REQUIRED",
 ]);
 
 export class VerificationError extends Error {
@@ -77,7 +83,12 @@ const COLUMNS = "id, user_id, casino, casino_username, status, note, created_at,
 // ───────────────────────── capturas (almacenamiento privado) ─────────────────────────
 
 const PROOF_BUCKET = "verification-proofs";
-export const PROOF_MAX_BYTES = 5 * 1024 * 1024; // 5 MB por captura
+/** Lo máximo que puede pesar la captura que sube el usuario. */
+export const PROOF_MAX_BYTES = 3 * 1024 * 1024; // 3 MB por captura
+// Lo máximo que se guarda ya convertida. El panel la sirve por una función del
+// servidor, y en Vercel una respuesta no puede pasar de unos 4,5 MB.
+const STORED_MAX_BYTES = 3 * 1024 * 1024;
+const MAX_INPUT_PIXELS = 60_000_000;
 export type ProofKind = "welcome" | "deposit";
 
 type Detected = { ext: "png" | "jpg" | "webp"; contentType: string };
@@ -93,29 +104,82 @@ export function detectProofImage(bytes: Uint8Array): Detected | null {
   return null;
 }
 
+/**
+ * Convierte la captura a WebP sin cambiar su tamaño en píxeles.
+ *  · PNG y WebP (capturas de pantalla): WebP SIN pérdida, los píxeles quedan
+ *    idénticos y normalmente pesa bastante menos.
+ *  · JPEG (ya viene comprimido con pérdida; guardarlo sin pérdida lo haría
+ *    pesar varias veces más): WebP de calidad muy alta, sin diferencia a la vista.
+ * Si aun así pasara del tope guardado, baja la calidad lo justo hasta que quepa.
+ * De paso se descartan los metadatos (EXIF, GPS) y cualquier cosa del archivo
+ * que no sea la imagen. Devuelve null si el archivo no se puede abrir como
+ * imagen o no hay forma de que quepa.
+ */
+export async function convertProofToWebp(bytes: Uint8Array): Promise<Uint8Array | null> {
+  const kind = detectProofImage(bytes);
+  if (!kind) return null;
+  try {
+    const source = () => sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS, failOn: "error" }).rotate();
+    if (kind.ext !== "jpg") {
+      const lossless = await source().webp({ lossless: true, effort: 3 }).toBuffer();
+      if (lossless.length <= STORED_MAX_BYTES) return new Uint8Array(lossless);
+    }
+    for (const quality of [95, 88, 78, 60]) {
+      const out = await source().webp({ quality, effort: 3, smartSubsample: true }).toBuffer();
+      if (out.length <= STORED_MAX_BYTES) return new Uint8Array(out);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+const WEBP = "image/webp";
+const draftPath = (userId: number, kind: ProofKind) => `u${userId}/draft-${kind}.webp`;
+
 let bucketReady = false;
 
-/** El bucket se crea solo la primera vez, siempre privado (sin URL pública). */
+/**
+ * El bucket se crea solo la primera vez, siempre privado (sin URL pública).
+ * Si ya existía, se le vuelven a poner sus límites y se fuerza a privado.
+ */
 async function proofStorage() {
   const storage = getSupabaseAdmin().storage;
   if (!bucketReady) {
-    const { error } = await storage.createBucket(PROOF_BUCKET, {
-      public: false,
-      fileSizeLimit: PROOF_MAX_BYTES,
-      allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
-    });
-    if (error && !/already exists|duplicate/i.test(String(error.message))) throw error;
+    const options = { public: false, fileSizeLimit: STORED_MAX_BYTES, allowedMimeTypes: [WEBP] };
+    const { error } = await storage.createBucket(PROOF_BUCKET, options);
+    if (error) {
+      if (!/already exists|duplicate/i.test(String(error.message))) throw error;
+      const { error: updateError } = await storage.updateBucket(PROOF_BUCKET, options);
+      if (updateError) throw updateError;
+    }
     bucketReady = true;
   }
   return storage.from(PROOF_BUCKET);
 }
 
-async function uploadProof(userId: number, kind: ProofKind, bytes: Uint8Array, image: Detected) {
-  const path = `u${userId}/${crypto.randomUUID()}-${kind}.${image.ext}`;
-  const { error } = await (await proofStorage()).upload(path, bytes, {
-    contentType: image.contentType,
-    upsert: false,
+/**
+ * Guarda una captura ya convertida como borrador del usuario. Hay un borrador
+ * por usuario y tipo: subir otra lo sustituye, así que no se acumulan. Las
+ * capturas llegan de una en una porque dos juntas no caben en una petición.
+ */
+export async function saveProofDraft(userId: number, kind: ProofKind, webp: Uint8Array) {
+  const { error } = await (await proofStorage()).upload(draftPath(userId, kind), webp, {
+    contentType: WEBP,
+    upsert: true,
   });
+  if (error) throw error;
+}
+
+async function readProofDraft(userId: number, kind: ProofKind): Promise<Uint8Array | null> {
+  const { data, error } = await (await proofStorage()).download(draftPath(userId, kind));
+  if (error || !data) return null;
+  return new Uint8Array(await data.arrayBuffer());
+}
+
+async function uploadProof(userId: number, kind: ProofKind, webp: Uint8Array) {
+  const path = `u${userId}/${crypto.randomUUID()}-${kind}.webp`;
+  const { error } = await (await proofStorage()).upload(path, webp, { contentType: WEBP, upsert: false });
   if (error) throw error;
   return path;
 }
@@ -171,7 +235,7 @@ export async function getProofImage(
 
   const { data: blob, error: downloadError } = await (await proofStorage()).download(path);
   if (downloadError || !blob) return null;
-  return { bytes: await blob.arrayBuffer(), contentType: blob.type || "image/jpeg" };
+  return { bytes: await blob.arrayBuffer(), contentType: blob.type || WEBP };
 }
 
 // ───────────────────────── solicitudes ─────────────────────────
@@ -189,6 +253,19 @@ export async function getLatestVerificationRequest(userId: number): Promise<Veri
   return (data?.[0] as VerificationRequest | undefined) ?? null;
 }
 
+/** Todas las solicitudes del usuario, la más reciente primero. */
+export async function listUserVerificationRequests(userId: number): Promise<VerificationRequest[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .from("verification_requests")
+    .select(COLUMNS)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(50);
+  if (error) throw toError(error);
+  return (data ?? []) as VerificationRequest[];
+}
+
 /** Casinos en los que el usuario ya está verificado. */
 export async function getVerifiedCasinos(userId: number): Promise<string[]> {
   const { data, error } = await getSupabaseAdmin()
@@ -201,23 +278,26 @@ export async function getVerifiedCasinos(userId: number): Promise<string[]> {
   return (data ?? []).map((row) => String(row.casino));
 }
 
-export type NewVerification = {
-  casino: string;
-  casinoUsername: string;
-  welcome: { bytes: Uint8Array; image: Detected };
-  deposit: { bytes: Uint8Array; image: Detected };
-};
+export type NewVerification = { casino: string; casinoUsername: string };
 
 /**
- * Crea la solicitud con sus dos capturas. Si la solicitud no se llega a crear
- * (ya hay una pendiente, el usuario de casino está cogido...), las capturas
- * recién subidas se borran.
+ * Crea la solicitud con las dos capturas que el usuario dejó subidas como
+ * borrador (PROOF_REQUIRED si falta alguna). Si la solicitud no se llega a
+ * crear (ya hay una pendiente, el usuario de casino está cogido...), los
+ * borradores se conservan para que pueda corregir y reenviar sin subirlas otra
+ * vez; al crearse, se borran.
  */
 export async function requestVerification(userId: number, input: NewVerification) {
+  const [welcome, deposit] = await Promise.all([
+    readProofDraft(userId, "welcome"),
+    readProofDraft(userId, "deposit"),
+  ]);
+  if (!welcome || !deposit) throw new VerificationError("PROOF_REQUIRED");
+
   const paths: string[] = [];
   try {
-    paths.push(await uploadProof(userId, "welcome", input.welcome.bytes, input.welcome.image));
-    paths.push(await uploadProof(userId, "deposit", input.deposit.bytes, input.deposit.image));
+    paths.push(await uploadProof(userId, "welcome", welcome));
+    paths.push(await uploadProof(userId, "deposit", deposit));
 
     const { data, error } = await getSupabaseAdmin().rpc("verification_request", {
       p_user_id: userId,
@@ -233,11 +313,14 @@ export async function requestVerification(userId: number, input: NewVerification
     // la solicitud sigue adelante igual.
     const { error: hashError } = await getSupabaseAdmin()
       .from("verification_requests")
-      .update({ welcome_hash: proofHash(input.welcome.bytes), deposit_hash: proofHash(input.deposit.bytes) })
+      .update({ welcome_hash: proofHash(welcome), deposit_hash: proofHash(deposit) })
       .eq("id", created.id);
     if (hashError && !isMissingHashColumn(hashError)) {
       console.error("[VERIFICATION] No se pudo guardar la huella de las capturas de la solicitud", created.id, hashError);
     }
+    await removeProofs([draftPath(userId, "welcome"), draftPath(userId, "deposit")]).catch((cleanupError) =>
+      console.error("[VERIFICATION] No se pudieron borrar los borradores de las capturas:", cleanupError)
+    );
     return created;
   } catch (error) {
     await removeProofs(paths).catch((cleanupError) =>
@@ -247,7 +330,7 @@ export async function requestVerification(userId: number, input: NewVerification
   }
 }
 
-/** Huella de una captura: SHA-256 de la imagen tal como llega. */
+/** Huella de una captura: SHA-256 de la imagen ya convertida a WebP (la misma imagen da la misma huella). */
 const proofHash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 const isMissingHashColumn = (error: unknown) =>
@@ -416,7 +499,11 @@ export async function removeUserVerification(userId: number) {
       .eq("user_id", userId);
     if (error) throw toError(error);
 
-    await removeProofs((data ?? []).flatMap((row) => [row.welcome_proof, row.deposit_proof]));
+    await removeProofs([
+      ...(data ?? []).flatMap((row) => [row.welcome_proof, row.deposit_proof]),
+      draftPath(userId, "welcome"),
+      draftPath(userId, "deposit"),
+    ]);
     const { error: deleteError } = await db.from("verification_requests").delete().eq("user_id", userId);
     if (deleteError) throw toError(deleteError);
     const { error: userError } = await db
