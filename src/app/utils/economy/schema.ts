@@ -193,11 +193,12 @@ export const DEFAULT_ECONOMY_SETTINGS: EconomySettings = {
     maxwin: { points: 1000, windowMinutes: 10, maxPerStream: 2 },
   },
   leaderboard: {
+    // Bonus de puntos al empezar el mes siguiente. Sin multiplicador «% por
+    // ver» (multiplierPct a 0) y sin premio del puesto 11 en adelante.
     scale: [
-      { from: 1, to: 1, points: 50000, multiplierPct: 25 },
-      { from: 2, to: 3, points: 30000, multiplierPct: 15 },
-      { from: 4, to: 10, points: 15000, multiplierPct: 10 },
-      { from: 11, to: 50, points: 5000, multiplierPct: 0 },
+      { from: 1, to: 1, points: 10000, multiplierPct: 0 },
+      { from: 2, to: 3, points: 6000, multiplierPct: 0 },
+      { from: 4, to: 10, points: 3000, multiplierPct: 0 },
     ],
   },
   monthlyReset: { enabled: true },

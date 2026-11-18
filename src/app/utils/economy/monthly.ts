@@ -1,3 +1,5 @@
+import { VipUnavailableError, vipResetBalances } from "@/app/utils/points/vip";
+import { getShopSettings } from "@/app/utils/shop/settings";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { closeMonthAuctions } from "@/app/utils/auctions/monthly";
 import { closeMonthGiveaways } from "@/app/utils/giveaways/monthly";
@@ -174,6 +176,27 @@ export async function runMonthlyReset(options: { force?: boolean } = {}): Promis
       }
       steps.usersReset = total;
       await mark({ balances_reset_at: nowSec(), users_reset: (row.users_reset ?? 0) + total });
+    }
+
+    // 4b. Saldos VIP a cero, solo si el ajuste de la tienda lo pide. Es
+    // idempotente por mes y usuario, así que no necesita su propia marca.
+    step = "vip_balances";
+    if ((await getShopSettings()).vipMonthlyReset === 1) {
+      try {
+        let totalVip = 0;
+        for (;;) {
+          const res = await vipResetBalances(month, BALANCE_CHUNK);
+          totalVip += res.processed;
+          if (res.remaining === 0) break;
+          if (res.processed === 0 || Date.now() - startedMs > MAX_RUN_MS) {
+            throw new Error("Reinicio de saldos VIP incompleto; se reanudará en la siguiente ejecución");
+          }
+        }
+        steps.vipUsersReset = totalVip;
+      } catch (error) {
+        // Sin la migración 0032 no hay saldos VIP que reiniciar.
+        if (!(error instanceof VipUnavailableError)) throw error;
+      }
     }
 
     // 5. Bonus del leaderboard.

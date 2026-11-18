@@ -17,6 +17,8 @@ export type DecoratedOrder = {
   /** Lleva un código reservado. */
   has_code: boolean;
   code_email_sent: boolean | null;
+  /** Premio pujado con puntos VIP: queda pendiente de comprobar la verificación. */
+  vip: boolean;
 };
 
 export type UserOrder = {
@@ -41,6 +43,8 @@ export type OrderDetail = {
   /** Resultado del último envío del código por email (null: sin enviar). */
   code_email_sent: boolean | null;
   needs_review: boolean;
+  /** Premio pujado con puntos VIP. */
+  vip: boolean;
   reviewed_at: string | null;
   reviewed_by: string | null;
   review_note: string | null;

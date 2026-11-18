@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { PRODUCT_CATEGORIES } from "@/app/utils/products/categories";
+import { PRODUCT_CURRENCIES } from "@/app/utils/products/currency";
 
 const EMPTY_FORM = {
   name: "",
@@ -23,6 +25,8 @@ const EMPTY_FORM = {
   value_eur: "",
   delivery_type: "code",
   requires_trade_link: false,
+  category: "",
+  currency: "points",
   codesText: "",
 };
 
@@ -63,6 +67,9 @@ export default function CreateProductModal({
           value_eur: formData.value_eur,
           delivery_type: formData.delivery_type,
           requires_trade_link: formData.requires_trade_link,
+          category: formData.category,
+          // Solo se manda si es VIP: así se pueden crear premios aunque falte la 0032.
+          ...(formData.currency === "vip" ? { currency: "vip" } : {}),
           codes,
         }),
       });
@@ -94,7 +101,7 @@ export default function CreateProductModal({
           <DialogTitle>Crear Premio</DialogTitle>
           <DialogDescription>
             El premio espera sin fecha de cierre hasta que alguien puje; la primera
-            puja abre la batalla.
+            puja pone en marcha la cuenta atrás.
           </DialogDescription>
         </DialogHeader>
 
@@ -166,6 +173,42 @@ export default function CreateProductModal({
               />
               <p className="mt-1 text-xs text-muted-foreground">
                 Si supera el umbral de revisión, el pedido se revisa a mano antes de entregarse.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right">Categoría</Label>
+            <select
+              className="col-span-3 flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={formData.category}
+              onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+            >
+              <option value="">Sin categoría (solo en «Todos»)</option>
+              {PRODUCT_CATEGORIES.map((category) => (
+                <option key={category.key} value={category.key}>
+                  {category.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right">Moneda</Label>
+            <div className="col-span-3">
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={formData.currency}
+                onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+              >
+                {PRODUCT_CURRENCIES.map((currency) => (
+                  <option key={currency.key} value={currency.key}>
+                    {currency.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Con puntos VIP solo pujan los usuarios verificados, el premio sale en «Verificados» y la puja mínima es siempre 1 punto VIP.
               </p>
             </div>
           </div>

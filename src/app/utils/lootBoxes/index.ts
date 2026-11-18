@@ -10,6 +10,7 @@ import {
   assertPrizeShape,
   createBoxSchema,
   createPrizeSchema,
+  isBoxSoldOut,
   isDrawable,
   updateBoxSchema,
   updatePrizeSchema,
@@ -46,7 +47,8 @@ const PRIZE_COLUMNS =
 
 /**
  * Cajas activas con sus premios activos. Un premio agotado sigue en la lista
- * (puede salir y dar sus puntos de respaldo). Nunca pesos, stock ni respaldo.
+ * (puede salir y dar sus puntos de respaldo). Nunca pesos, unidades ni
+ * respaldo: del stock solo sale si un premio o la caja entera están agotados.
  */
 export async function getPublicLootBoxes(): Promise<PublicBox[]> {
   const { data, error } = await getSupabaseAdmin()
@@ -63,6 +65,7 @@ export async function getPublicLootBoxes(): Promise<PublicBox[]> {
     description: box.description,
     image: box.image,
     price: box.price,
+    sold_out: isBoxSoldOut(box.prizes || []),
     prizes: (box.prizes || [])
       .filter(isDrawable)
       .sort(
@@ -78,6 +81,7 @@ export async function getPublicLootBoxes(): Promise<PublicBox[]> {
           rarity: p.rarity,
           kind: p.kind,
           points: p.points,
+          sold_out: p.kind === "item" && p.stock !== null && p.stock <= 0,
         })
       ),
   }));
@@ -474,6 +478,8 @@ export async function openLootBox(userId: number, boxId: number): Promise<Opened
 
     const pool = (box.prizes || []).filter(isDrawable);
     if (!pool.some((p) => p.weight > 0)) throw new PointsError("NO_PRIZES_AVAILABLE");
+    // Sin premios dentro la caja está agotada: no se abre ni se cobra.
+    if (isBoxSoldOut(box.prizes || [])) throw new PointsError("BOX_SOLD_OUT");
 
     const { balance } = await assertCanSpend(userId);
     if (balance < box.price) throw new PointsError("INSUFFICIENT_POINTS");
@@ -507,6 +513,7 @@ export async function openLootBox(userId: number, boxId: number): Promise<Opened
           rarity: prize.rarity,
           kind: result.kind,
           points: result.kind === "points" ? result.points_awarded : null,
+          sold_out: false,
           fallback: result.fallback,
         },
       };

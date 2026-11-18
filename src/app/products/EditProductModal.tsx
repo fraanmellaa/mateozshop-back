@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { PRODUCT_CATEGORIES } from "@/app/utils/products/categories";
+import { PRODUCT_CURRENCIES } from "@/app/utils/products/currency";
 import type { ProductRow } from "@/app/utils/products";
 import { toDateTimeLocal } from "@/app/utils/datetime";
 
@@ -25,6 +27,8 @@ const EMPTY_FORM = {
   value_eur: "",
   delivery_type: "code",
   requires_trade_link: false,
+  category: "",
+  currency: "points",
   codesText: "",
 };
 
@@ -38,13 +42,15 @@ function toForm(product: ProductRow): typeof EMPTY_FORM {
     value_eur: product.value_eur === null ? "" : String(product.value_eur),
     delivery_type: product.delivery_type,
     requires_trade_link: product.requires_trade_link,
+    category: product.category ?? "",
+    currency: product.currency ?? "points",
     codesText: (product.codes || []).join("\n"),
   };
 }
 
 const STATUS_TEXT: Record<string, string> = {
   waiting: "Esperando la primera puja",
-  in_progress: "En batalla",
+  in_progress: "En puja",
   archived: "Sin stock (archivado)",
   finalizing: "Adjudicándose",
   cancelling: "Retirándose",
@@ -87,6 +93,8 @@ export default function EditProductModal({
     if (formData.delivery_type !== initial.delivery_type) changes.delivery_type = formData.delivery_type;
     if (formData.requires_trade_link !== initial.requires_trade_link)
       changes.requires_trade_link = formData.requires_trade_link;
+    if (formData.category !== initial.category) changes.category = formData.category;
+    if (formData.currency !== initial.currency) changes.currency = formData.currency;
     if (formData.delivery_type === "code" && formData.codesText !== initial.codesText) {
       changes.codes = formData.codesText
         .split("\n")
@@ -211,6 +219,42 @@ export default function EditProductModal({
               />
               <p className="mt-1 text-xs text-muted-foreground">
                 Si supera el umbral de revisión, el pedido se revisa a mano antes de entregarse.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right">Categoría</Label>
+            <select
+              className="col-span-3 flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={formData.category}
+              onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+            >
+              <option value="">Sin categoría (solo en «Todos»)</option>
+              {PRODUCT_CATEGORIES.map((category) => (
+                <option key={category.key} value={category.key}>
+                  {category.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right">Moneda</Label>
+            <div className="col-span-3">
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={formData.currency}
+                onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+              >
+                {PRODUCT_CURRENCIES.map((currency) => (
+                  <option key={currency.key} value={currency.key}>
+                    {currency.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Con puntos VIP solo pujan los usuarios verificados, el premio sale en «Verificados» y la puja mínima es siempre 1 punto VIP.
               </p>
             </div>
           </div>

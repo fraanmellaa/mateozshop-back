@@ -19,6 +19,10 @@ export type ShopBidErrorCode =
   | "USER_NOT_FOUND"
   | "USER_BANNED"
   | "ADULT_REQUIRED"
+  | "VERIFIED_REQUIRED"
+  | "VIP_NOT_OPEN"
+  | "VIP_WIN_CAP_REACHED"
+  | "VIP_ALREADY_LEADING"
   | "USER_ACCOUNT_NOT_LINKED"
   | "ACCOUNT_TOO_NEW"
   | "TRADE_LINK_REQUIRED"
@@ -37,6 +41,13 @@ const STATUS: Record<ShopBidErrorCode, number> = {
   USER_NOT_FOUND: 404,
   USER_BANNED: 403,
   ADULT_REQUIRED: 403,
+  // Premio en puntos VIP y el usuario no está verificado (migración 0032).
+  VERIFIED_REQUIRED: 403,
+  // Las pujas VIP se abren en el último directo del mes (ajuste vipOpensAt).
+  VIP_NOT_OPEN: 409,
+  // Como mucho un premio VIP por persona y mes: ya ganó uno, o lidera otro.
+  VIP_WIN_CAP_REACHED: 409,
+  VIP_ALREADY_LEADING: 409,
   USER_ACCOUNT_NOT_LINKED: 409,
   ACCOUNT_TOO_NEW: 403,
   TRADE_LINK_REQUIRED: 409,
@@ -72,7 +83,10 @@ export type PlaceBidResult = {
   /** Usuario al que se le ha devuelto la retención (null si no había o era el mismo). */
   previous_bidder_user_id: number | null;
   previous_amount: number;
+  /** Saldo que queda en la moneda del premio. */
   balance: number;
+  /** Moneda del premio; ausente si falta la migración 0032 (= puntos normales). */
+  currency?: "points" | "vip";
 };
 
 /** Puja reteniendo puntos y devolviendo los del superado, todo en una transacción. */

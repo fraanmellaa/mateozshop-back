@@ -18,6 +18,13 @@ export type User = {
   used_points: number;
   verification_code: number;
   is_banned?: boolean | null;
+  /** Verificado a mano por el admin. Ausente si falta la migración 0032. */
+  is_verified?: boolean | null;
+  /** Casinos en los que está verificado: decide su tramo de puntos VIP. */
+  verified_casinos?: number | null;
+  verified_at?: number | null;
+  /** Saldo de puntos VIP (solo los verificados los ganan). */
+  vip_points?: number | null;
   actual_points: number; // Calculated as total_points - used_points
   created_at: string; // ISO date string
 };

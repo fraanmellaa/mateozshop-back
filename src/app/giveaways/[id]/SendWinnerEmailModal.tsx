@@ -36,7 +36,7 @@ export default function SendWinnerEmailModal({
     `¡Felicidades! Has ganado: ${giveawayTitle}`
   );
   const [message, setMessage] = useState(
-    `¡Hola ${winnerName}!\n\n¡Felicidades! Has sido seleccionado como ganador de nuestro sorteo "${giveawayTitle}".\n\nNuestro equipo se pondrá en contacto contigo pronto para coordinar la entrega del premio.\n\n¡Gracias por participar!\n\n— El equipo de MateozShop`
+    `¡Hola ${winnerName}!\n\n¡Felicidades! Has sido seleccionado como ganador de nuestro sorteo "${giveawayTitle}".\n\nNuestro equipo se pondrá en contacto contigo pronto para coordinar la entrega del premio.\n\n¡Gracias por participar!\n\n— El equipo de MateoZShop`
   );
   const [isLoading, setIsLoading] = useState(false);
 
@@ -60,7 +60,7 @@ export default function SendWinnerEmailModal({
     // Reset form cuando se cierra
     setSubject(`¡Felicidades! Has ganado: ${giveawayTitle}`);
     setMessage(
-      `¡Hola ${winnerName}!\n\n¡Felicidades! Has sido seleccionado como ganador de nuestro sorteo "${giveawayTitle}".\n\nNuestro equipo se pondrá en contacto contigo pronto para coordinar la entrega del premio.\n\n¡Gracias por participar!\n\n— El equipo de MateozShop`
+      `¡Hola ${winnerName}!\n\n¡Felicidades! Has sido seleccionado como ganador de nuestro sorteo "${giveawayTitle}".\n\nNuestro equipo se pondrá en contacto contigo pronto para coordinar la entrega del premio.\n\n¡Gracias por participar!\n\n— El equipo de MateoZShop`
     );
   };
 

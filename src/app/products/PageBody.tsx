@@ -46,7 +46,7 @@ const DELIVERY_LABEL: Record<string, string> = {
 
 const STATUS_LABEL: Record<string, string> = {
   waiting: "Esperando pujas",
-  in_progress: "En batalla",
+  in_progress: "En puja",
   archived: "Sin stock",
   finalizing: "Adjudicándose",
   cancelling: "Retirándose",
@@ -64,7 +64,7 @@ export default function PageBody({ products }: { products: ProductRow[] }) {
   );
 
   const handleDeleteProduct = async (id: number) => {
-    if (!confirm("¿Eliminar este premio? Si hay una batalla con pujas, se devuelven los puntos al mejor postor."))
+    if (!confirm("¿Eliminar este premio? Si hay una puja en marcha, se devuelven los puntos al mejor postor."))
       return;
 
     try {

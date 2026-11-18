@@ -15,7 +15,7 @@ const poppins = Poppins({
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Mateoz Shop - Admin Dashboard",
+  title: "MateoZ Shop - Admin Dashboard",
 };
 
 export default function RootLayout({

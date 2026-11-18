@@ -353,14 +353,13 @@ export default function PageBody({
 
         {section(
           "Leaderboard mensual",
-          "Premio de cada tramo de puestos para el mes siguiente. El multiplicador no se acumula con el del mes anterior; sí con el de la racha.",
+          "Puntos que recibe cada tramo de puestos al empezar el mes siguiente.",
           <>
             {list("leaderboard.scale").map((_, i) => (
-              <div key={i} className="grid grid-cols-[1fr_1fr_1fr_1fr_auto] items-end gap-2">
+              <div key={i} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2">
                 {num(`leaderboard.scale.${i}.from`, "Desde")}
                 {num(`leaderboard.scale.${i}.to`, "Hasta")}
                 {num(`leaderboard.scale.${i}.points`, "Puntos")}
-                {num(`leaderboard.scale.${i}.multiplierPct`, "% por ver")}
                 {rowButtons("leaderboard.scale", i)}
               </div>
             ))}

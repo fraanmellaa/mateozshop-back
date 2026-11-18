@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getUserByDiscordId } from "@/app/utils/users";
+import { removeUserVerification } from "@/app/utils/verification";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 const bodySchema = z.object({ confirm: z.literal(true) });
@@ -48,6 +49,9 @@ export async function POST(
       }
       throw error;
     }
+
+    // Con la cuenta se van sus datos de verificación: capturas, casino y usuario del casino.
+    await removeUserVerification(user.id);
 
     return NextResponse.json({ success: true, data: { deleted: true } });
   } catch (error) {

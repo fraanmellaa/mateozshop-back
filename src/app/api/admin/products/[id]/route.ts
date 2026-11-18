@@ -10,6 +10,16 @@ import {
   productHasOrders,
   updateProduct,
 } from "@/app/utils/products";
+import {
+  CATEGORY_MIGRATION_ERROR,
+  PRODUCT_CATEGORY_KEYS,
+  isMissingCategoryColumn,
+} from "@/app/utils/products/categories";
+import {
+  PRODUCT_CURRENCY_KEYS,
+  VIP_MIGRATION_ERROR,
+  isMissingColumn,
+} from "@/app/utils/products/currency";
 
 /**
  * Cierra la subasta a nuevas pujas (place_bid solo admite `waiting` e
@@ -85,6 +95,11 @@ const updateSchema = z.object({
     .transform((v) => (v === "" ? null : v)),
   delivery_type: z.enum(["code", "trade", "dm"]).optional(),
   requires_trade_link: z.boolean().optional(),
+  category: z
+    .union([z.literal(""), z.null(), z.enum(PRODUCT_CATEGORY_KEYS)])
+    .optional()
+    .transform((v) => (v === "" ? null : v)),
+  currency: z.enum(PRODUCT_CURRENCY_KEYS).optional(),
   codes: z.array(z.string().trim().min(1).max(500)).max(10_000).optional(),
 });
 
@@ -112,13 +127,28 @@ export async function PUT(
     if (body.name !== undefined) updateData.name = body.name;
     if (body.description !== undefined) updateData.description = body.description;
     if (body.image !== undefined) updateData.image = body.image;
-    // Cambiar la puja mínima no toca una batalla ya abierta: place_bid solo la usa
+    // Cambiar la puja mínima no toca una puja ya abierta: place_bid solo la usa
     // para la primera puja.
     if (body.price !== undefined) updateData.price = body.price;
     if (body.stock !== undefined) updateData.stock = body.stock;
     if (body.value_eur !== undefined) updateData.value_eur = body.value_eur;
     if (body.requires_trade_link !== undefined) updateData.requires_trade_link = body.requires_trade_link;
     if (body.codes !== undefined) updateData.codes = body.codes;
+    if (body.category !== undefined) updateData.category = body.category;
+
+    // La moneda no se cambia con una puja en marcha: los puntos retenidos al
+    // mejor postor se devolverían en la moneda equivocada.
+    if (body.currency !== undefined && body.currency !== (existing.currency ?? "points")) {
+      if (existing.auction_status !== "waiting" || existing.current_bidder_user_id !== null) {
+        return NextResponse.json(
+          { error: "No se puede cambiar la moneda de un premio con una puja en marcha" },
+          { status: 409 }
+        );
+      }
+      updateData.currency = body.currency;
+    }
+    // Premio en puntos VIP: la puja mínima es siempre 1, para que se entregue.
+    if ((body.currency ?? existing.currency ?? "points") === "vip") updateData.price = 1;
 
     if (body.delivery_type !== undefined) {
       updateData.delivery_type = body.delivery_type;
@@ -145,6 +175,12 @@ export async function PUT(
 
     return NextResponse.json(product);
   } catch (error) {
+    if (isMissingCategoryColumn(error)) {
+      return NextResponse.json({ error: CATEGORY_MIGRATION_ERROR }, { status: 409 });
+    }
+    if (isMissingColumn(error, "currency")) {
+      return NextResponse.json({ error: VIP_MIGRATION_ERROR }, { status: 409 });
+    }
     console.error("Error updating product:", error);
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
   }

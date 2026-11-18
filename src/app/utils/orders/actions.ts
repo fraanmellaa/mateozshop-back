@@ -3,8 +3,9 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/app/utils/auth";
 import { refundPoints } from "@/app/utils/points";
+import { getOrderCurrency, refundVip } from "@/app/utils/points/vip";
 import { sendCustomEmail, sendEmail } from "../email";
-import { reviewOrderCore } from "./review";
+import { passOrderToNextCore, reviewOrderCore } from "./review";
 
 const UNAUTHORIZED = { success: false as const, error: "Sesión de administrador no válida" };
 
@@ -80,7 +81,9 @@ export async function updateOrderStatus(orderId: number, status: number) {
       // La devolución va primero y lleva clave de idempotencia: si algo falla
       // después, repetir la cancelación no devuelve los puntos dos veces.
       if (order.total > 0) {
-        await refundPoints(order.user_id, order.total, {
+        // Un premio pujado con puntos VIP se devuelve en puntos VIP.
+        const refund = (await getOrderCurrency(order.id)) === "vip" ? refundVip : refundPoints;
+        await refund(order.user_id, order.total, {
           kind: "order_refund",
           refType: "order",
           refId: order.id,
@@ -231,5 +234,18 @@ export async function reviewOrder(orderId: number, approve: boolean, note: strin
   } catch (error) {
     console.error("Error reviewing order:", error);
     return { success: false as const, error: "Error al revisar el pedido" };
+  }
+}
+
+/** Premio VIP sin verificación comprobada: pasa a la siguiente puja más alta. */
+export async function passOrderToNext(orderId: number, note: string) {
+  const admin = await requireAdmin();
+  if (!admin) return UNAUTHORIZED;
+
+  try {
+    return await passOrderToNextCore(orderId, note, admin.username);
+  } catch (error) {
+    console.error("Error passing order to next bid:", error);
+    return { success: false as const, error: "Error al pasar el premio al siguiente" };
   }
 }

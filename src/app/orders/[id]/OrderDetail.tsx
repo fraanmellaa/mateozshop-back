@@ -37,7 +37,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
   // Tras router.refresh() llega el pedido actualizado desde el servidor.
   useEffect(() => setCurrentOrder(order), [order]);
   const [isResendingCode, setIsResendingCode] = useState(false);
-  const [review, setReview] = useState<{ approve: boolean } | null>(null);
+  const [review, setReview] = useState<{ approve: boolean; next?: boolean } | null>(null);
 
   const pendingReview =
     currentOrder.needs_review && !currentOrder.reviewed_at && currentOrder.status !== 2;
@@ -394,10 +394,19 @@ export default function OrderDetail({ order }: OrderDetailProps) {
             {pendingReview ? (
               <>
                 <p className="text-sm text-yellow-300">
-                  Premio de más de la cifra de revisión: no se entrega hasta que lo apruebes.
+                  {currentOrder.vip
+                    ? "Premio VIP pendiente de comprobar: no se entrega hasta que confirmes la verificación del ganador. Si no se puede comprobar, pásalo a la siguiente puja más alta."
+                    : "Premio de más de la cifra de revisión: no se entrega hasta que lo apruebes."}
                 </p>
-                <div className="mt-3 flex gap-2">
-                  <Button onClick={() => setReview({ approve: true })}>Aprobar</Button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button onClick={() => setReview({ approve: true })}>
+                    {currentOrder.vip ? "Confirmar" : "Aprobar"}
+                  </Button>
+                  {currentOrder.vip && (
+                    <Button variant="outline" onClick={() => setReview({ approve: false, next: true })}>
+                      Pasar al siguiente
+                    </Button>
+                  )}
                   <Button variant="destructive" onClick={() => setReview({ approve: false })}>
                     Rechazar y devolver puntos
                   </Button>
@@ -560,6 +569,8 @@ export default function OrderDetail({ order }: OrderDetailProps) {
       <ReviewOrderModal
         orderId={currentOrder.id}
         approve={review?.approve ?? true}
+        vip={currentOrder.vip}
+        passNext={review?.next ?? false}
         isOpen={review !== null}
         onClose={() => setReview(null)}
         onDone={() => {

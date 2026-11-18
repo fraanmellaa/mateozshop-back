@@ -9,7 +9,7 @@ import { z } from "zod";
 
 export const shopSettingsSchema = z
   .object({
-    /** Duración de la batalla desde la primera puja. */
+    /** Duración de la puja desde la primera puja. */
     battleMinutes: z.number().int().min(1).max(1440),
     /** Una puja dentro de estos minutos finales alarga la cuenta atrás. */
     extendWindowMinutes: z.number().int().min(0).max(120),
@@ -23,9 +23,25 @@ export const shopSettingsSchema = z
     minAccountAgeDays: z.number().int().min(0).max(3650),
     /** Los premios que valgan más de esto (€) requieren revisión manual. */
     reviewThresholdEur: z.number().min(0).max(1_000_000),
+    /**
+     * Puntos VIP que gana cada minuto de directo un usuario verificado en UN
+     * casino (además de sus puntos normales). 0 = no se reparten.
+     */
+    vipPointsPerMinute: z.number().int().min(0).max(1000),
+    /** Ídem con 2 casinos verificados. */
+    vipPointsPerMinuteTwo: z.number().int().min(0).max(1000),
+    /** Ídem con 3 casinos verificados o más (tope). */
+    vipPointsPerMinuteThree: z.number().int().min(0).max(1000),
+    /** 1 = los saldos VIP se ponen a cero en el reinicio mensual; 0 = se conservan. */
+    vipMonthlyReset: z.number().int().min(0).max(1),
+    /**
+     * Apertura de las pujas VIP (segundos Unix): el último directo del mes.
+     * 0 = sin fecha, cerradas. Solo vale dentro de su mes (lo lee place_bid).
+     */
+    vipOpensAt: z.number().int().min(0).max(4_102_444_800),
   })
   .refine((v) => v.extendWindowMinutes <= v.battleMinutes, {
-    message: "La ventana de prórroga no puede superar la duración de la batalla",
+    message: "La ventana de prórroga no puede superar la duración de la puja",
     path: ["extendWindowMinutes"],
   });
 
@@ -39,7 +55,22 @@ export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
   maxWinsPerMonth: 3,
   minAccountAgeDays: 30,
   reviewThresholdEur: 25,
+  vipPointsPerMinute: 10,
+  vipPointsPerMinuteTwo: 15,
+  vipPointsPerMinuteThree: 20,
+  vipMonthlyReset: 1,
+  vipOpensAt: 0,
 };
+
+/** ¿Están abiertas las pujas VIP? Misma regla que `vip_bids_open` (migración 0032). */
+export function vipBidsOpen(vipOpensAt: number, nowSeconds = Math.floor(Date.now() / 1000)): boolean {
+  if (!vipOpensAt || nowSeconds < vipOpensAt) return false;
+  const month = (seconds: number) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Andorra", year: "numeric", month: "2-digit" }).format(
+      new Date(seconds * 1000)
+    );
+  return month(vipOpensAt) === month(nowSeconds);
+}
 
 export type SettingsIssue = { path: string; message: string };
 

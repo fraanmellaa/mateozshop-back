@@ -60,7 +60,7 @@ export default function LoginPage() {
               Panel de Administración
             </h1>
             <p className="text-muted-foreground mt-2">
-              Accede a Mateoz Shop Admin
+              Accede a MateoZ Shop Admin
             </p>
           </div>
 
@@ -122,7 +122,7 @@ export default function LoginPage() {
           {/* Footer */}
           <div className="mt-8 text-center">
             <p className="text-sm text-muted-foreground">
-              Sistema de administración de Mateoz Shop
+              Sistema de administración de MateoZ Shop
             </p>
           </div>
         </div>

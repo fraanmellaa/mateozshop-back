@@ -118,6 +118,55 @@ export default function PageBody({ users }: { users: User[] }) {
     }
   };
 
+  // Verificación y puntos VIP (migración 0032): una sola ruta para las tres acciones.
+  const postVip = async (user: User, body: Record<string, unknown>) => {
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}/vip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        alert(
+          result?.error === "VIP_UNAVAILABLE"
+            ? result.message
+            : result?.error === "INSUFFICIENT_POINTS"
+              ? "No tiene tantos puntos VIP"
+              : "Error al actualizar los puntos VIP"
+        );
+        return;
+      }
+      router.refresh();
+    } catch (error) {
+      console.error("Error updating VIP:", error);
+      alert("Error al actualizar los puntos VIP");
+    }
+  };
+
+  const handleToggleVerified = (user: User) => {
+    const question = user.is_verified
+      ? `¿Quitar la verificación a ${user.username}? Dejará de ganar puntos VIP y de poder pujar por premios de verificados (conserva los que tenga).`
+      : `¿Marcar a ${user.username} como verificado? Empezará a ganar puntos VIP y podrá pujar por los premios de verificados.`;
+    if (!window.confirm(question)) return;
+    void postVip(user, { action: "verify", verified: !user.is_verified });
+  };
+
+  const handleVipAmount = (user: User, action: "add" | "remove") => {
+    const text = window.prompt(
+      action === "add"
+        ? `Puntos VIP que se le dan a ${user.username}:`
+        : `Puntos VIP que se le quitan a ${user.username} (tiene ${user.vip_points ?? 0}):`
+    );
+    if (text === null) return;
+    const amount = Number(text.trim());
+    if (!Number.isInteger(amount) || amount <= 0) {
+      alert("Escribe un número entero mayor que 0");
+      return;
+    }
+    void postVip(user, { action, amount });
+  };
+
   const handleToggleBan = async (user: User) => {
     const question = user.is_banned
       ? `¿Desbanear a ${user.username}?`
@@ -223,6 +272,23 @@ export default function PageBody({ users }: { users: User[] }) {
       },
       cell: ({ row }) => (
         <div className="text-left">{row.original.actual_points}</div>
+      ),
+    },
+    {
+      accessorKey: "vip_points",
+      header: () => <div className="text-left">VIP</div>,
+      cell: ({ row }) => (
+        <div className="text-left">
+          {row.original.is_verified ? (
+            <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-xs font-semibold text-violet-200">
+              Verificado · {row.original.vip_points ?? 0}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">
+              {row.original.vip_points ? row.original.vip_points : "—"}
+            </span>
+          )}
+        </div>
       ),
     },
     {
@@ -337,6 +403,27 @@ export default function PageBody({ users }: { users: User[] }) {
               >
                 <RotateCcw className="mr-2 h-4 w-4" />
                 Resetear Puntos
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => handleToggleVerified(user)}
+                className="flex items-center text-violet-300"
+              >
+                {user.is_verified ? "Quitar verificación" : "Marcar como verificado"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => handleVipAmount(user, "add")}
+                className="flex items-center text-violet-300"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Dar Puntos VIP
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => handleVipAmount(user, "remove")}
+                className="flex items-center text-violet-300"
+              >
+                <Minus className="mr-2 h-4 w-4" />
+                Quitar Puntos VIP
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               {user.twitch_id && (

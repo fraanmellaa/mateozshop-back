@@ -23,6 +23,7 @@ export const getOrders = async (): Promise<DecoratedOrder[]> => {
         reviewed_at,
         delivered_code,
         code_email_sent,
+        currency,
         user:users!orders_user_id_fkey(id, username, email, steam_trade_url),
         product:products!orders_product_id_fkey(id, name, image, price, delivery_type)
       `
@@ -49,6 +50,7 @@ export const getOrders = async (): Promise<DecoratedOrder[]> => {
       steam_trade_url: user?.steam_trade_url ?? null,
       has_code: Boolean(order.delivered_code),
       code_email_sent: order.code_email_sent ?? null,
+      vip: order.currency === "vip",
     };
   });
 };
@@ -65,6 +67,7 @@ export const getOrderById = async (orderId: number): Promise<OrderDetail | null>
       delivered_code,
       code_email_sent,
       needs_review,
+      currency,
       reviewed_at,
       reviewed_by,
       review_note,
@@ -94,6 +97,7 @@ export const getOrderById = async (orderId: number): Promise<OrderDetail | null>
     delivered_code: order.delivered_code ?? null,
     code_email_sent: order.code_email_sent ?? null,
     needs_review: Boolean(order.needs_review),
+    vip: order.currency === "vip",
     reviewed_at:
       order.reviewed_at === null || order.reviewed_at === undefined
         ? null

@@ -13,18 +13,28 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { reviewOrder } from "@/app/utils/orders/actions";
+import { passOrderToNext, reviewOrder } from "@/app/utils/orders/actions";
 
-/** Aprobar o rechazar un pedido que requiere revisión manual. */
+/**
+ * Aprobar o rechazar un pedido que requiere revisión manual. En un premio VIP
+ * la revisión es comprobar la verificación del ganador: se confirma o, con
+ * `passNext`, el premio pasa a la siguiente puja más alta.
+ */
 export default function ReviewOrderModal({
   orderId,
   approve,
+  vip = false,
+  passNext = false,
   isOpen,
   onClose,
   onDone,
 }: {
   orderId: number | null;
   approve: boolean;
+  /** Premio VIP: «Aprobar» se llama «Confirmar». */
+  vip?: boolean;
+  /** Pasar el premio VIP a la siguiente puja más alta (manda sobre `approve`). */
+  passNext?: boolean;
   isOpen: boolean;
   onClose: () => void;
   onDone: () => void;
@@ -36,12 +46,31 @@ export default function ReviewOrderModal({
     if (orderId === null) return;
     setIsLoading(true);
     try {
+      if (passNext) {
+        const result = await passOrderToNext(orderId, note);
+        if (result.success) {
+          toast.success(
+            result.action === "passed"
+              ? `Premio adjudicado a la siguiente puja${result.username ? ` (${result.username})` : ""}: pedido #${result.newOrderId}, pendiente de comprobar`
+              : "No quedaba ninguna otra puja válida: el premio se ha vuelto a poner en puja"
+          );
+          setNote("");
+          onDone();
+        } else {
+          toast.error(result.error || "Error al pasar el premio al siguiente");
+        }
+        return;
+      }
       const result = await reviewOrder(orderId, approve, note);
       if (result.success) {
         if ("warning" in result && result.warning) toast.warning(result.warning);
         else
           toast.success(
-            approve ? "Pedido aprobado" : "Pedido rechazado y puntos devueltos al usuario"
+            approve
+              ? vip
+                ? "Premio VIP confirmado"
+                : "Pedido aprobado"
+              : "Pedido rechazado y puntos devueltos al usuario"
           );
         setNote("");
         onDone();
@@ -60,17 +89,21 @@ export default function ReviewOrderModal({
       <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
           <DialogTitle>
-            {approve ? "Aprobar" : "Rechazar"} el pedido #{orderId}
+            {passNext ? "Pasar al siguiente" : approve ? (vip ? "Confirmar" : "Aprobar") : "Rechazar"} el pedido #{orderId}
           </DialogTitle>
           <DialogDescription>
-            {approve
-              ? "Si lleva código, se enviará al usuario por email."
-              : "El pedido se cancela y se devuelven los puntos al usuario. Indica el motivo."}
+            {passNext
+              ? "Se anula este pedido, se devuelven los puntos VIP al ganador y el premio se adjudica a la siguiente puja más alta, que queda también pendiente de comprobar. Si no queda ninguna, el premio se vuelve a poner en puja."
+              : approve
+                ? vip
+                  ? "Confirmas que has comprobado la verificación del ganador. Si lleva código, se enviará al usuario por email."
+                  : "Si lleva código, se enviará al usuario por email."
+                : "El pedido se cancela y se devuelven los puntos al usuario. Indica el motivo."}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2">
-          <Label htmlFor="review-note">{approve ? "Nota (opcional)" : "Motivo"}</Label>
+          <Label htmlFor="review-note">{passNext || approve ? "Nota (opcional)" : "Motivo"}</Label>
           <textarea
             id="review-note"
             className="h-24 w-full rounded-md border p-2 text-sm"
@@ -86,11 +119,19 @@ export default function ReviewOrderModal({
           </Button>
           <Button
             type="button"
-            variant={approve ? "default" : "destructive"}
-            disabled={isLoading || (!approve && !note.trim())}
+            variant={approve && !passNext ? "default" : "destructive"}
+            disabled={isLoading || (!passNext && !approve && !note.trim())}
             onClick={handleConfirm}
           >
-            {isLoading ? "Guardando..." : approve ? "Aprobar" : "Rechazar y devolver puntos"}
+            {isLoading
+              ? "Guardando..."
+              : passNext
+                ? "Pasar al siguiente"
+                : approve
+                  ? vip
+                    ? "Confirmar"
+                    : "Aprobar"
+                  : "Rechazar y devolver puntos"}
           </Button>
         </DialogFooter>
       </DialogContent>

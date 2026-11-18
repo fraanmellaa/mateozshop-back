@@ -59,6 +59,8 @@ export type PublicPrize = {
   rarity: Rarity;
   kind: PrizeKind;
   points: number | null;
+  /** Objeto con unidades contadas al que ya no le queda ninguna. */
+  sold_out: boolean;
 };
 
 /** Premio entregado al abrir: con `fallback` el stock se había agotado y se pagaron puntos. */
@@ -70,6 +72,8 @@ export type PublicBox = {
   description: string | null;
   image: string | null;
   price: number;
+  /** Ya no quedan premios dentro: la caja no se puede abrir. */
+  sold_out: boolean;
   prizes: PublicPrize[];
 };
 

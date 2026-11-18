@@ -92,7 +92,7 @@ export default function SendEmailModal({
           <div className="p-3 bg-yellow-50 dark:bg-yellow-950/20 rounded-md">
             <p className="text-sm text-yellow-800 dark:text-yellow-200">
               <strong>Nota:</strong> El email se enviará desde la dirección
-              oficial de Mateoz Shop.
+              oficial de MateoZ Shop.
             </p>
           </div>
 

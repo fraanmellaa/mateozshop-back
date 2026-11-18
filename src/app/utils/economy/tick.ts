@@ -1,4 +1,6 @@
 import { syncLiveState } from "@/app/utils/live";
+import { VipUnavailableError, vipWatchTick } from "@/app/utils/points/vip";
+import { getShopSettings } from "@/app/utils/shop/settings";
 
 import { rpc } from "./db";
 import { isResetBlocking } from "./monthly";
@@ -36,6 +38,24 @@ export async function runEconomyTick(): Promise<TickResult> {
   });
 
   if (!res.ok) return { status: "not_live" };
+
+  // Puntos VIP de los verificados, en el mismo minuto. Va aparte y no puede
+  // tumbar el reparto normal: si falla (o falta la migración 0032) solo se anota.
+  try {
+    const shop = await getShopSettings();
+    const rates = {
+      one: shop.vipPointsPerMinute,
+      two: shop.vipPointsPerMinuteTwo,
+      three: shop.vipPointsPerMinuteThree,
+    };
+    if (rates.one > 0 || rates.two > 0 || rates.three > 0) {
+      await vipWatchTick(rates, s.watch.chatWindowMinutes * 60);
+    }
+  } catch (error) {
+    if (!(error instanceof VipUnavailableError)) {
+      console.error("[ECONOMY] Reparto de puntos VIP falló:", error);
+    }
+  }
   return {
     status: "ok",
     duplicate: Boolean(res.duplicate),

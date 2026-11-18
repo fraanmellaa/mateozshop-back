@@ -116,7 +116,7 @@ async function notifyWinnerByEmail(
   let sent = false;
   if (winner.email) {
     const details = [`Premio: ${productName}`, `Puja ganadora: ${result.amount} puntos`];
-    let intro = `Enhorabuena, has ganado ${productName} en Mateoz Shop.`;
+    let intro = `Enhorabuena, has ganado ${productName} en MateoZ Shop.`;
 
     if (result.needs_review) {
       intro += " Antes de entregarlo tenemos que revisar el pedido manualmente; te avisaremos cuando esté listo.";

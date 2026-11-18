@@ -64,6 +64,18 @@ type RulePrize = { rarity: Rarity; kind: PrizeKind; is_active: boolean; stock: n
 export const isDrawable = (p: { is_active: boolean }) => p.is_active;
 
 /**
+ * Una caja se agota cuando se acaban los premios de dentro: tiene premios que
+ * son objetos con unidades contadas y a todos les quedan 0. Una caja que solo
+ * reparte puntos (o con objetos sin límite) no se agota nunca.
+ */
+export function isBoxSoldOut(
+  prizes: { is_active: boolean; kind: string; stock: number | null }[]
+): boolean {
+  const limited = prizes.filter((p) => p.is_active && p.kind === "item" && p.stock !== null);
+  return limited.length > 0 && limited.every((p) => (p.stock ?? 0) <= 0);
+}
+
+/**
  * Comprueba el estado completo de una caja. Los pesos siempre deben sumar
  * 10000; si la caja está (o va a estar) activa, además debe tener premio de
  * puntos común y premios en cada categoría con peso.

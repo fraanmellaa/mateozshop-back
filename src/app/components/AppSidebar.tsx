@@ -17,6 +17,7 @@ import {
   Newspaper,
   Megaphone,
   Scale,
+  BadgeCheck,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -45,6 +46,11 @@ const items = [
     title: "Usuarios",
     url: "/users",
     icon: User2,
+  },
+  {
+    title: "Verificaciones",
+    url: "/verifications",
+    icon: BadgeCheck,
   },
   {
     title: "Productos",
@@ -146,7 +152,7 @@ export function AppSidebar() {
             >
               <a href="#">
                 <span className="text-base font-semibold">
-                  MateozShop Admin
+                  MateoZShop Admin
                 </span>
               </a>
             </SidebarMenuButton>

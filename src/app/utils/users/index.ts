@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { creditPoints, resetPoints, revokePoints } from "@/app/utils/points";
+import { creditVip, revokeVip, setUserVerified } from "@/app/utils/points/vip";
 import { User } from "./types";
 
 export type { User };
@@ -19,6 +20,9 @@ function mapUserRow(user: Record<string, unknown>) {
   return {
     ...user,
     is_banned: Boolean(user.is_banned),
+    is_verified: Boolean(user.is_verified),
+    verified_casinos: Number(user.verified_casinos || 0),
+    vip_points: Number(user.vip_points || 0),
     actual_points:
       Number(user.total_points || 0) - Number(user.used_points || 0),
     created_at: new Date(Number(user.created_at || 0) * 1000).toISOString(),
@@ -41,6 +45,9 @@ export function toPublicUser(user: User) {
     steam_trade_url: user.steam_trade_url ?? null,
     adult_confirmed: Boolean(user.adult_confirmed_at),
     is_banned: Boolean(user.is_banned),
+    is_verified: Boolean(user.is_verified),
+    verified_casinos: Number(user.verified_casinos || 0),
+    vip_points: Number(user.vip_points || 0),
   };
 }
 
@@ -125,6 +132,24 @@ export const removeAvailablePointsFromUserById = async (
   amount: number
 ) => {
   await revokePoints(userId, amount, { kind: "admin_remove" });
+  return getUserById(userId);
+};
+
+// Puntos VIP y verificación (migración 0032). Lanzan VipUnavailableError si la
+// migración no está aplicada.
+
+export const setUserVerifiedById = async (userId: number, verified: boolean, admin: string) => {
+  const found = await setUserVerified(userId, verified, admin);
+  return found ? getUserById(userId) : null;
+};
+
+export const addVipPointsToUserById = async (userId: number, amount: number) => {
+  await creditVip(userId, amount, { kind: "admin_add" });
+  return getUserById(userId);
+};
+
+export const removeVipPointsFromUserById = async (userId: number, amount: number) => {
+  await revokeVip(userId, amount, { kind: "admin_remove" });
   return getUserById(userId);
 };
 

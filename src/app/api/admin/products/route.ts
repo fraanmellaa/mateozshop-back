@@ -3,6 +3,16 @@ import { z } from "zod";
 
 import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
 import { createProduct, getAdminProducts } from "@/app/utils/products";
+import {
+  CATEGORY_MIGRATION_ERROR,
+  PRODUCT_CATEGORY_KEYS,
+  isMissingCategoryColumn,
+} from "@/app/utils/products/categories";
+import {
+  PRODUCT_CURRENCY_KEYS,
+  VIP_MIGRATION_ERROR,
+  isMissingColumn,
+} from "@/app/utils/products/currency";
 
 export async function GET() {
   if (!(await requireAdmin())) return adminUnauthorized();
@@ -28,6 +38,11 @@ const createSchema = z.object({
     .transform((v) => (v === "" || v === undefined ? null : v)),
   delivery_type: z.enum(["code", "trade", "dm"]),
   requires_trade_link: z.boolean().optional(),
+  category: z
+    .union([z.literal(""), z.null(), z.enum(PRODUCT_CATEGORY_KEYS)])
+    .optional()
+    .transform((v) => (v === "" ? null : v)),
+  currency: z.enum(PRODUCT_CURRENCY_KEYS).optional(),
   codes: z.array(z.string().trim().min(1).max(500)).max(10_000).optional(),
 });
 
@@ -46,12 +61,20 @@ export async function POST(request: NextRequest) {
 
     const product = await createProduct({
       ...body,
+      // Premio en puntos VIP: la puja mínima es siempre 1, para que se entregue.
+      ...(body.currency === "vip" ? { price: 1 } : {}),
       // Las skins por intercambio de Steam necesitan el enlace del ganador.
       requires_trade_link: body.delivery_type === "trade" ? true : Boolean(body.requires_trade_link),
     });
 
     return NextResponse.json(product, { status: 201 });
   } catch (error) {
+    if (isMissingCategoryColumn(error)) {
+      return NextResponse.json({ error: CATEGORY_MIGRATION_ERROR }, { status: 409 });
+    }
+    if (isMissingColumn(error, "currency")) {
+      return NextResponse.json({ error: VIP_MIGRATION_ERROR }, { status: 409 });
+    }
     console.error("Error creating product:", error);
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
   }

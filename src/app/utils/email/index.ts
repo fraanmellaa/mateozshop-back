@@ -44,7 +44,7 @@ function buildEmailLayout(params: {
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #0f1220;">
       <div style="background: linear-gradient(135deg, #2f2179 0%, #161a2e 100%); padding: 32px 28px; border-radius: 18px 18px 0 0; border: 1px solid rgba(255,255,255,0.08); border-bottom: none;">
         <p style="margin: 0 0 12px; color: #53fc18; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;">
-          ${escapeHtml(params.eyebrow || "Mateoz Shop")}
+          ${escapeHtml(params.eyebrow || "MateoZ Shop")}
         </p>
         <h1 style="margin: 0; color: #ffffff; font-size: 28px; line-height: 1.2;">
           ${escapeHtml(params.title)}
@@ -56,7 +56,7 @@ function buildEmailLayout(params: {
         </div>
         ${cta}
         <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 13px; line-height: 1.6;">
-          Este correo se ha enviado automaticamente desde Mateoz Shop.
+          Este correo se ha enviado automaticamente desde MateoZ Shop.
         </div>
       </div>
     </div>
@@ -77,7 +77,7 @@ async function deliverEmail(params: {
 
   try {
     const { error } = await resend.emails.send({
-      from: "Mateoz Shop <hola@mateozshop.com>",
+      from: "MateoZ Shop <hola@mateozshop.com>",
       to: [params.to],
       subject: params.subject,
       html: params.html,

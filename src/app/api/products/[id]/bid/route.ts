@@ -75,7 +75,7 @@ export async function POST(
             discordId: previousDiscordId,
             type: "auction_outbid",
             title: "Te han sobrepujado",
-            body: `${user.username} subió la puja a ${bid.amount} puntos. Te hemos devuelto tus ${bid.previous_amount} puntos.`,
+            body: `${user.username} subió la puja a ${bid.amount} ${bid.currency === "vip" ? "puntos VIP" : "puntos"}. Te hemos devuelto tus ${bid.previous_amount} ${bid.currency === "vip" ? "puntos VIP" : "puntos"}.`,
             productId,
             amount: bid.amount,
             targetUrl: `/puntos?auction=${productId}&open=1`,
@@ -94,7 +94,9 @@ export async function POST(
           bidderName: user.username,
           bidderImage: user.image,
           bidderId: user.id,
+          // Saldo que queda en la moneda del premio (`currency`).
           balance: bid.balance,
+          currency: bid.currency === "vip" ? "vip" : "points",
           auctionEndsAt: bid.auction_ends_at,
           minNextBid: bid.min_next_bid,
           extended: bid.extended,

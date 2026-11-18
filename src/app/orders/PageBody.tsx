@@ -54,7 +54,7 @@ const isPendingDelivery = (o: DecoratedOrder) =>
 export default function PageBody({ allOrders }: { allOrders: DecoratedOrder[] }) {
   const router = useRouter();
   const [view, setView] = useState<View>("all");
-  const [review, setReview] = useState<{ id: number; approve: boolean } | null>(null);
+  const [review, setReview] = useState<{ id: number; approve: boolean; vip: boolean; next?: boolean } | null>(null);
 
   const orders = useMemo(
     () =>
@@ -184,7 +184,13 @@ export default function PageBody({ allOrders }: { allOrders: DecoratedOrder[] })
               ))}
             {o.needs_review && (
               <div className={o.reviewed ? "text-green-300" : "text-yellow-300"}>
-                {o.reviewed ? "Revisado" : "Pendiente de revisión"}
+                {o.vip
+                  ? o.reviewed
+                    ? "Comprobado"
+                    : "Pendiente de comprobar"
+                  : o.reviewed
+                    ? "Revisado"
+                    : "Pendiente de revisión"}
               </div>
             )}
           </div>
@@ -266,11 +272,18 @@ export default function PageBody({ allOrders }: { allOrders: DecoratedOrder[] })
               <DropdownMenuSeparator />
               {isPendingReview(order) && (
                 <>
-                  <DropdownMenuItem onClick={() => setReview({ id: order.id, approve: true })}>
-                    Aprobar
+                  <DropdownMenuItem onClick={() => setReview({ id: order.id, approve: true, vip: order.vip })}>
+                    {order.vip ? "Confirmar" : "Aprobar"}
                   </DropdownMenuItem>
+                  {order.vip && (
+                    <DropdownMenuItem
+                      onClick={() => setReview({ id: order.id, approve: false, vip: true, next: true })}
+                    >
+                      Pasar al siguiente
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem
-                    onClick={() => setReview({ id: order.id, approve: false })}
+                    onClick={() => setReview({ id: order.id, approve: false, vip: order.vip })}
                     className="text-red-300"
                   >
                     Rechazar y devolver puntos
@@ -334,7 +347,7 @@ export default function PageBody({ allOrders }: { allOrders: DecoratedOrder[] })
         {(
           [
             ["all", "Todos", allOrders.length],
-            ["review", "Pendientes de revisión", reviewCount],
+            ["review", "Pendientes de revisar o comprobar", reviewCount],
             ["deliveries", "Entregas pendientes", deliveryCount],
           ] as [View, string, number][]
         ).map(([key, label, count]) => (
@@ -447,6 +460,8 @@ export default function PageBody({ allOrders }: { allOrders: DecoratedOrder[] })
       <ReviewOrderModal
         orderId={review?.id ?? null}
         approve={review?.approve ?? true}
+        vip={review?.vip ?? false}
+        passNext={review?.next ?? false}
         isOpen={review !== null}
         onClose={() => setReview(null)}
         onDone={() => {

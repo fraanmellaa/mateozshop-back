@@ -30,7 +30,9 @@ export type PointsErrorCode =
   | "BOX_NOT_ACTIVE"
   | "PRIZE_UNAVAILABLE"
   | "PRIZE_OUT_OF_STOCK"
-  | "NO_PRIZES_AVAILABLE";
+  | "NO_PRIZES_AVAILABLE"
+  | "BOX_SOLD_OUT"
+  | "INVALID_QUANTITY";
 
 const KNOWN_CODES = new Set<string>([
   "INVALID_AMOUNT",
