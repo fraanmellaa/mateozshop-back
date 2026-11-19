@@ -1,4 +1,5 @@
 import { VipUnavailableError, vipResetBalances } from "@/app/utils/points/vip";
+import { cancelOpenClassicPredictions } from "@/app/utils/classicPredictions";
 import { getShopSettings } from "@/app/utils/shop/settings";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { closeMonthAuctions } from "@/app/utils/auctions/monthly";
@@ -152,6 +153,13 @@ export async function runMonthlyReset(options: { force?: boolean } = {}): Promis
       const { closed } = await closeMonthAuctions();
       steps.auctions = closed;
       await mark({ auctions_closed_at: nowSec(), auctions_closed: (row.auctions_closed ?? 0) + closed });
+    }
+
+    // 2b. Predicciones (Classic) sin resultado: se anulan y se devuelven los
+    // puntos antes de poner los saldos a cero. Idempotente, sin marca propia.
+    step = "classic_predictions";
+    if (!row.balances_reset_at) {
+      steps.classicPredictions = await cancelOpenClassicPredictions("monthly_reset");
     }
 
     // 3. Sorteos.

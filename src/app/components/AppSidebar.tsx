@@ -20,6 +20,7 @@ import {
   BadgeCheck,
   Vote,
   ChartColumn,
+  Dices,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -103,6 +104,11 @@ const items = [
     title: "Predicciones",
     url: "/stream-predictions",
     icon: Vote,
+  },
+  {
+    title: "Predicciones (Classic)",
+    url: "/classic-predictions",
+    icon: Dices,
   },
   {
     title: "Pronósticos",
