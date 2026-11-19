@@ -60,12 +60,16 @@ export async function GET(request: NextRequest) {
         multiplierPct: economy.watch?.multiplierPct ?? 0,
         minutesToday: economy.streak?.minutesToday ?? 0,
         qualifiedToday: Boolean(economy.streak?.qualifiedToday),
+        minutesNeeded: economy.streak?.minutesNeeded ?? 0,
+        // Cobro de racha del último día de directo y próximo cobro (día y puntos).
+        collected: economy.streak?.collected ?? null,
+        next: economy.streak?.next ?? null,
       },
       live: {
         kick: Boolean(platforms?.kick || economy.watch?.live?.kick),
         twitch: Boolean(platforms?.twitch || economy.watch?.live?.twitch),
       },
-      // Cajas gratis: mismo estado que ve la web (solo lectura).
+      // Caja diaria: mismo estado que ve la web (solo lectura).
       boxes: {
         daily: {
           available: Boolean(economy.dailyBox?.available),
@@ -73,11 +77,6 @@ export async function GET(request: NextRequest) {
           minutesNeeded: economy.dailyBox?.minutesNeeded ?? 0,
           minutesToday: economy.dailyBox?.minutesToday ?? 0,
           tiers: economy.dailyBox?.tiers ?? [],
-        },
-        streak: {
-          available: economy.streakBox?.available ?? 0,
-          everyDays: economy.streakBox?.everyDays ?? 0,
-          tiers: economy.streakBox?.tiers ?? [],
         },
       },
     });

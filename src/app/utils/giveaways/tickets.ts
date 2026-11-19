@@ -37,6 +37,12 @@ export async function buyGiveawayTicket(userId: number, giveawayId: number) {
   return data as { entry_id: number; giveaway_id: number; user_id: number; balance: number };
 }
 
+/** Coste válido de un ticket en el panel: entero de 1 a 100 millones de puntos. */
+export function isValidTicketCost(value: unknown): boolean {
+  const cost = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  return typeof cost === "number" && Number.isSafeInteger(cost) && cost >= 1 && cost <= 100_000_000;
+}
+
 /** Máximo de tickets en una sola compra. */
 export const MAX_TICKETS_PER_PURCHASE = 100;
 

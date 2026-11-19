@@ -77,7 +77,7 @@ async function deliverEmail(params: {
 
   try {
     const { error } = await resend.emails.send({
-      from: "MateoZ Shop <hola@mateozshop.com>",
+      from: "MateoZ Shop <hola@mateoz.shop>",
       to: [params.to],
       subject: params.subject,
       html: params.html,

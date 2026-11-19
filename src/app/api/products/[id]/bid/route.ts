@@ -1,11 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { z } from "zod";
 
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { placeBid, shopBidErrorResponse } from "@/app/utils/shop/bids";
+import { placeBidWhenLive, shopBidErrorResponse } from "@/app/utils/shop/bids";
 import { publishBidUpdated, publishUserNotification } from "@/app/utils/realtime";
 import { getUserByDiscordId } from "@/app/utils/users";
 import { isResetBlocking } from "@/app/utils/economy/monthly";
+import { clientIpFromHeaders, recordUserIp } from "@/app/utils/orders/duplicates";
 
 const bodySchema = z.object({
   discord_id: z.string().min(1),
@@ -47,7 +48,14 @@ export async function POST(
     }
 
     // Retiene los puntos del pujador y devuelve los del anterior, todo atómico.
-    const bid = await placeBid(user.id, productId, body.amount);
+    // Abrir una puja exige directo encendido: si el tick aún no lo ha visto, se
+    // comprueba en el momento (ver placeBidWhenLive).
+    const bid = await placeBidWhenLive(user.id, productId, body.amount);
+
+    // IP del pujador (la reenvía la web): solo sirve para avisar en el panel de
+    // posibles cuentas repetidas. No bloquea nada ni puede fallar la puja.
+    const clientIp = clientIpFromHeaders(request.headers);
+    if (clientIp) after(() => recordUserIp(user.id, clientIp));
 
     // La puja ya es firme: un fallo de Ably no debe devolver error al pujador.
     try {
@@ -62,7 +70,9 @@ export async function POST(
         auctionEndsAt: bid.auction_ends_at,
       });
 
-      if (bid.previous_bidder_user_id) {
+      // previous_amount llega a 0 si esos puntos eran de antes de un reinicio de
+      // saldos: no se le ha devuelto nada, así que no se le avisa de lo contrario.
+      if (bid.previous_bidder_user_id && bid.previous_amount > 0) {
         const { data: previousRows } = await getSupabaseAdmin()
           .from("users")
           .select("discord_id")

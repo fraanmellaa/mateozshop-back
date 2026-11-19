@@ -11,6 +11,7 @@ import {
   CreditCard,
   Settings,
   Mail,
+  TriangleAlert,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -395,7 +396,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
               <>
                 <p className="text-sm text-yellow-300">
                   {currentOrder.vip
-                    ? "Premio VIP pendiente de comprobar: no se entrega hasta que confirmes la verificación del ganador. Si no se puede comprobar, pásalo a la siguiente puja más alta."
+                    ? "Premio VIP pendiente de comprobar: no se entrega hasta que confirmes la verificación del ganador. Si no se puede comprobar, vuelve a ponerlo en puja (sus puntos VIP no se devuelven)."
                     : "Premio de más de la cifra de revisión: no se entrega hasta que lo apruebes."}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -404,7 +405,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
                   </Button>
                   {currentOrder.vip && (
                     <Button variant="outline" onClick={() => setReview({ approve: false, next: true })}>
-                      Pasar al siguiente
+                      Volver a poner en puja
                     </Button>
                   )}
                   <Button variant="destructive" onClick={() => setReview({ approve: false })}>
@@ -431,6 +432,71 @@ export default function OrderDetail({ order }: OrderDetailProps) {
           </div>
         )}
       </div>
+
+      {/* Cuentas repetidas: datos del ganador guardados en el pedido y avisos (solo informan) */}
+      {(currentOrder.winner || currentOrder.duplicate_flags.length > 0) && (
+        <div className="bg-card rounded-lg border border-border shadow-sm p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <TriangleAlert className="h-5 w-5 text-muted-foreground" />
+            <h2 className="text-lg font-semibold text-foreground">Cuentas repetidas</h2>
+          </div>
+
+          {currentOrder.duplicate_flags.length > 0 ? (
+            <ul className="mb-4 space-y-2">
+              {currentOrder.duplicate_flags.map((flag) => (
+                <li
+                  key={flag.type}
+                  className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-200"
+                >
+                  <span className="font-medium">{flag.text}:</span>{" "}
+                  {flag.users.map((user, index) => (
+                    <span key={user.id}>
+                      {index > 0 && ", "}
+                      <a href={`/users/${user.id}`} className="underline underline-offset-2">
+                        {user.username}
+                      </a>
+                    </span>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mb-4 text-sm text-muted-foreground">Sin coincidencias con otras cuentas.</p>
+          )}
+
+          {currentOrder.winner && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="text-sm font-medium text-muted-foreground">Correo de entrega</label>
+                <p className="text-sm text-foreground break-all">{currentOrder.winner.delivery_email ?? "—"}</p>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-muted-foreground">Usuario en el casino</label>
+                {currentOrder.winner.casino_accounts.length > 0 ? (
+                  currentOrder.winner.casino_accounts.map((account) => (
+                    <p key={`${account.casino}:${account.username}`} className="text-sm text-foreground break-all">
+                      {account.casino}: {account.username}
+                      {account.status === "pending" && (
+                        <span className="text-muted-foreground"> (en revisión)</span>
+                      )}
+                    </p>
+                  ))
+                ) : (
+                  <p className="text-sm text-foreground">—</p>
+                )}
+              </div>
+              <div>
+                <label className="text-sm font-medium text-muted-foreground">IP de su última puja</label>
+                <p className="text-sm font-mono text-foreground break-all">{currentOrder.winner.winner_ip ?? "—"}</p>
+              </div>
+            </div>
+          )}
+          <p className="mt-4 text-xs text-muted-foreground">
+            Son avisos para que lo compruebes: no bloquean la entrega. Los datos se guardan al adjudicarse el
+            premio y otra vez al marcarlo entregado.
+          </p>
+        </div>
+      )}
 
       {/* Código entregado */}
       {currentOrder.delivered_code && (

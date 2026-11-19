@@ -18,7 +18,7 @@ import { passOrderToNext, reviewOrder } from "@/app/utils/orders/actions";
 /**
  * Aprobar o rechazar un pedido que requiere revisión manual. En un premio VIP
  * la revisión es comprobar la verificación del ganador: se confirma o, con
- * `passNext`, el premio pasa a la siguiente puja más alta.
+ * `passNext`, el premio se vuelve a poner en puja (sin devolver los puntos).
  */
 export default function ReviewOrderModal({
   orderId,
@@ -33,7 +33,7 @@ export default function ReviewOrderModal({
   approve: boolean;
   /** Premio VIP: «Aprobar» se llama «Confirmar». */
   vip?: boolean;
-  /** Pasar el premio VIP a la siguiente puja más alta (manda sobre `approve`). */
+  /** Volver a poner en puja el premio VIP, sin devolver los puntos (manda sobre `approve`). */
   passNext?: boolean;
   isOpen: boolean;
   onClose: () => void;
@@ -52,12 +52,12 @@ export default function ReviewOrderModal({
           toast.success(
             result.action === "passed"
               ? `Premio adjudicado a la siguiente puja${result.username ? ` (${result.username})` : ""}: pedido #${result.newOrderId}, pendiente de comprobar`
-              : "No quedaba ninguna otra puja válida: el premio se ha vuelto a poner en puja"
+              : "Pedido anulado: el premio se ha vuelto a poner en puja. Ponle una fecha de apertura nueva en Premios"
           );
           setNote("");
           onDone();
         } else {
-          toast.error(result.error || "Error al pasar el premio al siguiente");
+          toast.error(result.error || "Error al volver a poner el premio en puja");
         }
         return;
       }
@@ -89,11 +89,11 @@ export default function ReviewOrderModal({
       <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
           <DialogTitle>
-            {passNext ? "Pasar al siguiente" : approve ? (vip ? "Confirmar" : "Aprobar") : "Rechazar"} el pedido #{orderId}
+            {passNext ? "Volver a poner en puja" : approve ? (vip ? "Confirmar" : "Aprobar") : "Rechazar"} el pedido #{orderId}
           </DialogTitle>
           <DialogDescription>
             {passNext
-              ? "Se anula este pedido, se devuelven los puntos VIP al ganador y el premio se adjudica a la siguiente puja más alta, que queda también pendiente de comprobar. Si no queda ninguna, el premio se vuelve a poner en puja."
+              ? "El ganador no ha acreditado su registro: se anula este pedido, sus puntos VIP NO se devuelven y el premio se vuelve a poner en puja. Queda cerrado hasta que le pongas una fecha de apertura nueva."
               : approve
                 ? vip
                   ? "Confirmas que has comprobado la verificación del ganador. Si lleva código, se enviará al usuario por email."
@@ -126,7 +126,7 @@ export default function ReviewOrderModal({
             {isLoading
               ? "Guardando..."
               : passNext
-                ? "Pasar al siguiente"
+                ? "Volver a poner en puja"
                 : approve
                   ? vip
                     ? "Confirmar"

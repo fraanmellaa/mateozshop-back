@@ -15,6 +15,8 @@ export interface PublicBonus {
   button_text: string | null;
   featured: boolean;
   conditions: string | null;
+  /** Euros de primer depósito que pide este casino para verificarse. */
+  verify_min_deposit: number;
 }
 
 export interface Bonus extends PublicBonus {
@@ -36,14 +38,74 @@ export interface BonusInput {
   button_text?: string | null;
   featured?: boolean;
   conditions?: string | null;
+  verify_min_deposit?: number;
   countries?: string[];
   blocked_countries?: string[];
   position?: number;
   is_active?: boolean;
 }
 
-const PUBLIC_COLUMNS = "id, casino_name, offer, description, image, url, color, button_text, featured, conditions";
-const ADMIN_COLUMNS = `${PUBLIC_COLUMNS}, countries, blocked_countries, position, is_active, created_at, updated_at`;
+const BASE_COLUMNS = "id, casino_name, offer, description, image, url, color, button_text, featured, conditions";
+const ADMIN_EXTRA = "countries, blocked_countries, position, is_active, created_at, updated_at";
+
+/** Depósito mínimo para verificarse cuando el casino no tiene otro puesto. */
+export const DEFAULT_VERIFY_MIN_DEPOSIT = 30;
+
+// La columna `verify_min_deposit` llega con la migración 0041. Hasta que se
+// aplique, las consultas se repiten sin ella y se usan estos valores (los
+// mismos que deja puestos la migración). Después solo manda la columna.
+const MIN_DEPOSIT_BEFORE_MIGRATION: Record<string, number> = { "casino gran madrid": 50 };
+let hasMinDepositColumn: boolean | null = null;
+
+const publicColumns = (withMin: boolean) => (withMin ? `${BASE_COLUMNS}, verify_min_deposit` : BASE_COLUMNS);
+const adminColumns = (withMin: boolean) => `${publicColumns(withMin)}, ${ADMIN_EXTRA}`;
+
+const isMissingColumn = (error: { code?: string; message?: string } | null) =>
+  !!error && (error.code === "42703" || error.code === "PGRST204" || /verify_min_deposit/.test(error.message ?? ""));
+
+/**
+ * Ejecuta una consulta de bonos con la columna del depósito mínimo y, si la
+ * columna aún no existe, la repite sin ella.
+ */
+async function withMinDeposit<T>(
+  run: (withMin: boolean) => PromiseLike<{ data: T; error: { code?: string; message?: string } | null }>
+) {
+  if (hasMinDepositColumn !== false) {
+    const first = await run(true);
+    if (!isMissingColumn(first.error)) {
+      if (!first.error) hasMinDepositColumn = true;
+      return first;
+    }
+    hasMinDepositColumn = false;
+    // Se vuelve a comprobar pasado un minuto, por si ya se aplicó la migración.
+    setTimeout(() => {
+      hasMinDepositColumn = null;
+    }, 60_000).unref?.();
+  }
+  return run(false);
+}
+
+/** Rellena el depósito mínimo de una fila leída sin la columna. */
+function fillMinDeposit<T extends { casino_name: string; verify_min_deposit?: number | null }>(row: T) {
+  const fallback =
+    MIN_DEPOSIT_BEFORE_MIGRATION[row.casino_name.trim().toLowerCase()] ?? DEFAULT_VERIFY_MIN_DEPOSIT;
+  return { ...row, verify_min_deposit: Number(row.verify_min_deposit ?? fallback) };
+}
+
+/** Depósito mínimo de cada casino, por nombre en minúsculas (panel de Verificaciones). */
+export async function getMinDepositByCasino(): Promise<Record<string, number>> {
+  const { data, error } = await withMinDeposit((withMin) =>
+    getSupabaseAdmin()
+      .from("bonuses")
+      .select(withMin ? "casino_name, verify_min_deposit" : "casino_name")
+  );
+  if (error) throw error;
+  const out: Record<string, number> = {};
+  for (const row of (data ?? []) as unknown as Array<{ casino_name: string; verify_min_deposit?: number }>) {
+    out[row.casino_name.trim().toLowerCase()] = fillMinDeposit(row).verify_min_deposit;
+  }
+  return out;
+}
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
@@ -69,18 +131,21 @@ export async function getActiveBonuses(
 ): Promise<PublicBonus[]> {
   if (HIDDEN_COUNTRIES.includes(country ?? DEFAULT_COUNTRY)) return [];
 
-  const { data, error } = await getSupabaseAdmin()
-    .from("bonuses")
-    .select(`${PUBLIC_COLUMNS}, is_active, countries, blocked_countries`)
-    .eq("is_active", true)
-    .order("position", { ascending: true })
-    .order("id", { ascending: true });
+  const { data, error } = await withMinDeposit((withMin) =>
+    getSupabaseAdmin()
+      .from("bonuses")
+      .select(`${publicColumns(withMin)}, is_active, countries, blocked_countries`)
+      .eq("is_active", true)
+      .order("position", { ascending: true })
+      .order("id", { ascending: true })
+  );
 
   if (error) throw error;
-  return ((data ?? []) as Bonus[])
+  return ((data ?? []) as unknown as Bonus[])
     .filter((bonus) => isBonusVisible(bonus, country))
+    .map(fillMinDeposit)
     .map(
-      ({ id, casino_name, offer, description, image, url, color, button_text, featured, conditions }) => ({
+      ({ id, casino_name, offer, description, image, url, color, button_text, featured, conditions, verify_min_deposit }) => ({
         id,
         casino_name,
         offer,
@@ -91,27 +156,32 @@ export async function getActiveBonuses(
         button_text,
         featured,
         conditions,
+        verify_min_deposit,
       })
     );
 }
 
 /** Todos los bonos (panel). */
 export async function getAllBonuses(): Promise<Bonus[]> {
-  const { data, error } = await getSupabaseAdmin()
-    .from("bonuses")
-    .select(ADMIN_COLUMNS)
-    .order("position", { ascending: true })
-    .order("id", { ascending: true });
+  const { data, error } = await withMinDeposit((withMin) =>
+    getSupabaseAdmin()
+      .from("bonuses")
+      .select(adminColumns(withMin))
+      .order("position", { ascending: true })
+      .order("id", { ascending: true })
+  );
 
   if (error) throw error;
-  return (data ?? []) as Bonus[];
+  return ((data ?? []) as unknown as Bonus[]).map(fillMinDeposit);
 }
 
 export async function createBonus(input: BonusInput): Promise<Bonus> {
   const now = nowSeconds();
-  const { data, error } = await getSupabaseAdmin()
+  const { data, error } = await withMinDeposit((withMin) =>
+    getSupabaseAdmin()
     .from("bonuses")
     .insert({
+      ...(withMin ? { verify_min_deposit: input.verify_min_deposit ?? DEFAULT_VERIFY_MIN_DEPOSIT } : {}),
       casino_name: input.casino_name,
       offer: input.offer,
       description: input.description ?? null,
@@ -128,11 +198,12 @@ export async function createBonus(input: BonusInput): Promise<Bonus> {
       created_at: now,
       updated_at: now,
     })
-    .select(ADMIN_COLUMNS)
-    .single();
+    .select(adminColumns(withMin))
+    .single()
+  );
 
   if (error) throw error;
-  return data as Bonus;
+  return fillMinDeposit(data as unknown as Bonus);
 }
 
 /** Actualización parcial. Devuelve null si el bono no existe. */
@@ -159,15 +230,21 @@ export async function updateBonus(
     if (input[key] !== undefined) patch[key] = input[key];
   }
 
-  const { data, error } = await getSupabaseAdmin()
-    .from("bonuses")
-    .update(patch)
-    .eq("id", id)
-    .select(ADMIN_COLUMNS)
-    .maybeSingle();
+  const { data, error } = await withMinDeposit((withMin) =>
+    getSupabaseAdmin()
+      .from("bonuses")
+      .update(
+        withMin && input.verify_min_deposit !== undefined
+          ? { ...patch, verify_min_deposit: input.verify_min_deposit }
+          : patch
+      )
+      .eq("id", id)
+      .select(adminColumns(withMin))
+      .maybeSingle()
+  );
 
   if (error) throw error;
-  return (data as Bonus | null) ?? null;
+  return data ? fillMinDeposit(data as unknown as Bonus) : null;
 }
 
 /** Devuelve false si el bono no existía. */

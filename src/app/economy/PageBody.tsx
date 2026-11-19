@@ -13,6 +13,7 @@ import {
   EconomySettings,
   economyIssues,
   economySettingsSchema,
+  RAIN_KINDS,
 } from "@/app/utils/economy/schema";
 
 type Draft = Record<string, unknown>;
@@ -108,9 +109,6 @@ export default function PageBody({
   const set = (path: string, value: unknown) => setDraft((d) => setAt(d, path, value));
   const list = (path: string) => (getAt(draft, path) as unknown[]) ?? [];
 
-  const issuesFor = (path: string) =>
-    issues.filter((i) => i.path === path || i.path.startsWith(`${path}.`));
-
   const num = (path: string, label: string, help?: string) => {
     const own = issues.filter((i) => i.path === path);
     return (
@@ -127,6 +125,41 @@ export default function PageBody({
             onChange={(e) => set(path, e.target.value)}
           />
           {help && <p className="mt-1 text-xs text-muted-foreground">{help}</p>}
+          {own.map((i, n) => (
+            <p key={n} className="mt-1 text-xs text-destructive">
+              {i.message}
+            </p>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Probabilidad en porcentaje (50, 12,5...): se guarda en puntos básicos
+  // (5000, 1250), que es como la usa el sorteo de la caja.
+  const pct = (path: string, label: string) => {
+    const own = issues.filter((i) => i.path === path);
+    const weight = Number(getAt(draft, path));
+    return (
+      <div key={path} className="grid grid-cols-4 items-start gap-4">
+        <Label htmlFor={path} className="pt-2 text-right">
+          {label}
+        </Label>
+        <div className="col-span-3">
+          <Input
+            id={path}
+            type="number"
+            min={0}
+            max={100}
+            step={0.01}
+            // Número (no texto) para que no se pierda la coma mientras se escribe.
+            value={Number.isFinite(weight) ? weight / 100 : ""}
+            aria-invalid={own.length > 0}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              set(path, e.target.value === "" || !Number.isFinite(value) ? "" : String(Math.round(value * 100)));
+            }}
+          />
           {own.map((i, n) => (
             <p key={n} className="mt-1 text-xs text-destructive">
               {i.message}
@@ -269,65 +302,50 @@ export default function PageBody({
         )}
 
         {section(
-          "Racha y caja de racha",
-          "La racha cuenta días de directo con los minutos necesarios; los días sin directo no la rompen y no se reinicia con el mes.",
+          "Racha",
+          "Cada día de directo que se llega a los minutos de racha se cobran puntos: los del primer día y la subida diaria, hasta el tope. La racha cuenta días de directo (los días sin directo no la rompen; faltar a un directo vuelve al día 1) y no se reinicia con el mes.",
           <>
-            {num("streak.bonusFromDay", "Bonus desde el día")}
-            {num("streak.bonusPct", "Bonus (%)", "Solo mientras la racha siga viva.")}
-            {num("streak.boxEveryDays", "Caja cada N días")}
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Tramos de la caja de racha</p>
-              {list("streak.boxTiers").map((_, i) => (
-                <div key={i} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
-                  {num(`streak.boxTiers.${i}.points`, "Puntos")}
-                  {num(`streak.boxTiers.${i}.weight`, "Peso (≈ %)")}
-                  {rowButtons("streak.boxTiers", i)}
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => set("streak.boxTiers", [...list("streak.boxTiers"), { points: "1000", weight: "1" }])}
-              >
-                Añadir tramo
-              </Button>
-              {issuesFor("streak.boxTiers").filter((i) => i.path === "streak.boxTiers").map((i, n) => (
-                <p key={n} className="text-xs text-destructive">{i.message}</p>
-              ))}
-            </div>
+            {num("streak.dailyFirst", "Puntos el día 1")}
+            {num("streak.dailyStep", "Subida por día")}
+            {num("streak.dailyMax", "Tope por día")}
+            {num("streak.weeklyEveryDays", "Extra cada N días seguidos", "0 = sin extra.")}
+            {num("streak.weeklyPoints", "Puntos del extra")}
           </>
         )}
 
         {section(
           "Caja diaria",
-          "Una por día de directo. Los pesos van en puntos básicos y suman 10.000 (7500 = 75 %).",
+          "Una por día de directo, solo puntos. Pon la probabilidad de cada premio en porcentaje: entre todos tienen que sumar 100 %. Las probabilidades no se publican en la web.",
           <>
-            {list("dailyBox.tiers").map((tier, i) => {
-              const t = tier as Record<string, unknown>;
-              const isItem = t.kind === "item";
-              return (
-                <div key={String(t.id)} className="space-y-3 rounded-md border p-3">
-                  <p className="text-sm font-medium">
-                    {String(t.id)} {isItem ? "(objeto)" : "(puntos)"}
-                  </p>
-                  {text(`dailyBox.tiers.${i}.label`, "Nombre")}
-                  {num(`dailyBox.tiers.${i}.weight`, "Peso (de 10.000)")}
-                  {isItem ? (
-                    <>
-                      {text(`dailyBox.tiers.${i}.name`, "Objeto")}
-                      {num(`dailyBox.tiers.${i}.monthlyStock`, "Stock mensual")}
-                      {num(`dailyBox.tiers.${i}.fallbackPoints`, "Puntos de respaldo", "Se dan si el objeto se ha agotado.")}
-                    </>
-                  ) : (
-                    <>
-                      {num(`dailyBox.tiers.${i}.pointsMin`, "Puntos mínimos")}
-                      {num(`dailyBox.tiers.${i}.pointsMax`, "Puntos máximos")}
-                    </>
-                  )}
-                </div>
-              );
-            })}
+            {list("dailyBox.tiers").map((_, i) => (
+              <div key={i} className="space-y-3 rounded-md border p-3">
+                {text(`dailyBox.tiers.${i}.label`, "Nombre")}
+                {pct(`dailyBox.tiers.${i}.weight`, "Probabilidad (%)")}
+                {num(`dailyBox.tiers.${i}.pointsMin`, "Puntos mínimos")}
+                {num(`dailyBox.tiers.${i}.pointsMax`, "Puntos máximos", "Igual que el mínimo para una cantidad fija.")}
+                <div className="flex justify-end">{rowButtons("dailyBox.tiers", i)}</div>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                set("dailyBox.tiers", [
+                  ...list("dailyBox.tiers"),
+                  {
+                    id: `t${Date.now().toString(36)}`,
+                    label: "Premio",
+                    weight: "0",
+                    kind: "points",
+                    pointsMin: "50",
+                    pointsMax: "50",
+                  },
+                ])
+              }
+            >
+              Añadir premio
+            </Button>
             {issues
               .filter((i) => i.path === "dailyBox.tiers")
               .map((i, n) => (
@@ -337,17 +355,27 @@ export default function PageBody({
         )}
 
         {section(
-          "Lluvias",
-          "Las lanza el streamer o un moderador con !lluvia y !maxwin. Máximo 0 = desactivada.",
+          "Eventos del directo",
+          "Los lanza el streamer o un moderador con !lluvia, !bigwin y !maxwin. Los cobra quien escribió en el chat en los minutos anteriores al comando. Máximo 0 = desactivado.",
           <>
-            {(["lluvia", "maxwin"] as const).map((kind) => (
+            {RAIN_KINDS.map((kind) => (
               <div key={kind} className="space-y-3 rounded-md border p-3">
                 <p className="text-sm font-medium">!{kind}</p>
-                {num(`rain.${kind}.points`, "Puntos por usuario")}
-                {num(`rain.${kind}.windowMinutes`, "Ventana de chat (min)")}
+                {num(`rain.${kind}.points`, "Puntos por persona")}
+                {num(`rain.${kind}.windowMinutes`, "Minutos anteriores de chat")}
                 {num(`rain.${kind}.maxPerStream`, "Máximo por directo")}
               </div>
             ))}
+          </>
+        )}
+
+        {section(
+          "Ranking de TikTok",
+          "Premio del mes para el top 3. Los ganadores se marcan a mano en la página de TikTok del panel.",
+          <>
+            {num("tiktok.monthlyPrizes.0", "Puntos del 1.º")}
+            {num("tiktok.monthlyPrizes.1", "Puntos del 2.º")}
+            {num("tiktok.monthlyPrizes.2", "Puntos del 3.º")}
           </>
         )}
 
@@ -434,7 +462,7 @@ export default function PageBody({
 
       {section(
         `Leaderboard de ${month}`,
-        "Vista previa del mes en curso: puntos ganados viendo y en lluvias (no cuentan juegos, cajas ni sorteos).",
+        "Vista previa del mes en curso: solo cuentan los puntos ganados viendo el directo. En caso de empate gana la racha más larga.",
         board === null ? (
           <p className="text-sm text-muted-foreground">No se ha podido cargar.</p>
         ) : board.length === 0 ? (

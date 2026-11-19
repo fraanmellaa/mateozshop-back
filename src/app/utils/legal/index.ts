@@ -3,7 +3,6 @@ import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const LEGAL_SLUGS = [
-  "aviso-legal",
   "terminos",
   "privacidad",
   "cookies",

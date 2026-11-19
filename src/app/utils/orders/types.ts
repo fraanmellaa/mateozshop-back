@@ -1,3 +1,5 @@
+import type { DuplicateFlag, OrderWinnerSnapshot } from "./duplicates";
+
 export type DeliveryType = "code" | "trade" | "dm";
 
 export type DecoratedOrder = {
@@ -19,6 +21,8 @@ export type DecoratedOrder = {
   code_email_sent: boolean | null;
   /** Premio pujado con puntos VIP: queda pendiente de comprobar la verificación. */
   vip: boolean;
+  /** Avisos de cuentas repetidas (correo, usuario de casino o IP). Solo informan. */
+  duplicate_flags: DuplicateFlag[];
 };
 
 export type UserOrder = {
@@ -48,6 +52,10 @@ export type OrderDetail = {
   reviewed_at: string | null;
   reviewed_by: string | null;
   review_note: string | null;
+  /** Correo de entrega, cuentas de casino e IP del ganador guardados en el pedido (null: falta la migración 0040). */
+  winner: OrderWinnerSnapshot | null;
+  /** Avisos de cuentas repetidas. Solo informan. */
+  duplicate_flags: DuplicateFlag[];
   user: {
     id: number;
     username: string;

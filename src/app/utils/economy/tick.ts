@@ -10,32 +10,61 @@ export type TickResult =
   | { status: "not_live" | "reset_pending" }
   | { status: "ok"; duplicate: boolean; minute: number; paid: number; points: number };
 
+type TickRpc = {
+  ok: boolean;
+  reason?: string;
+  duplicate?: boolean;
+  minute?: number;
+  paid?: number;
+  points?: number;
+};
+
+/** PostgREST no encuentra la función con esos parámetros (migración sin aplicar). */
+function isMissingFunction(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /could not find the function|PGRST202/i.test(message);
+}
+
 /**
  * Un minuto de economía: sincroniza el estado del directo y, si hay directo,
  * paga los minutos vistos (idempotente por minuto en SQL).
  */
 export async function runEconomyTick(): Promise<TickResult> {
   const state = await syncLiveState();
-  if (!state.live) return { status: "not_live" };
+  // Solo se paga con el directo confirmado encendido en esta misma lectura: una
+  // sesión que sigue abierta por margen (la plataforma ya dice que no hay
+  // directo, o lleva un rato sin contestar) no cobra.
+  if (!state.live || !state.confirmed) return { status: "not_live" };
 
   if (await isResetBlocking()) return { status: "reset_pending" };
 
   const s = await getEconomySettings();
-  const res = await rpc<{
-    ok: boolean;
-    reason?: string;
-    duplicate?: boolean;
-    minute?: number;
-    paid?: number;
-    points?: number;
-  }>("economy_watch_tick", {
+  const base = {
     p_points_per_minute: s.watch.pointsPerMinute,
     p_chat_window_seconds: s.watch.chatWindowMinutes * 60,
     p_streak_minutes: s.minutes.streak,
-    p_bonus_from_day: s.streak.bonusFromDay,
-    p_bonus_pct: s.streak.bonusPct,
-    p_box_every: s.streak.boxEveryDays,
-  });
+  };
+  let res: TickRpc;
+  try {
+    res = await rpc<TickRpc>("economy_watch_tick", {
+      ...base,
+      p_streak_first: s.streak.dailyFirst,
+      p_streak_step: s.streak.dailyStep,
+      p_streak_max: s.streak.dailyMax,
+      p_week_every: s.streak.weeklyEveryDays,
+      p_week_points: s.streak.weeklyPoints,
+    });
+  } catch (error) {
+    // Sin la migración 0037 la función aún tiene la forma antigua: se paga el
+    // minuto con ella (sin bonus ni caja de racha) en vez de no pagar nada.
+    if (!isMissingFunction(error)) throw error;
+    res = await rpc<TickRpc>("economy_watch_tick", {
+      ...base,
+      p_bonus_from_day: 1,
+      p_bonus_pct: 0,
+      p_box_every: 0,
+    });
+  }
 
   if (!res.ok) return { status: "not_live" };
 

@@ -16,8 +16,10 @@ import {
   isMissingCategoryColumn,
 } from "@/app/utils/products/categories";
 import {
+  AUCTION_RULES_MIGRATION_ERROR,
   PRODUCT_CURRENCY_KEYS,
   VIP_MIGRATION_ERROR,
+  isMissingAuctionRulesColumn,
   isMissingColumn,
 } from "@/app/utils/products/currency";
 
@@ -100,6 +102,12 @@ const updateSchema = z.object({
     .optional()
     .transform((v) => (v === "" ? null : v)),
   currency: z.enum(PRODUCT_CURRENCY_KEYS).optional(),
+  // «Disponible desde» en segundos Unix; vacío, null o 0 = quitar la fecha.
+  available_from: z
+    .union([z.literal(""), z.null(), z.coerce.number().int().min(0).max(4_102_444_800)])
+    .optional()
+    .transform((v) => (v === "" || v === 0 ? null : v)),
+  counts_for_cap: z.boolean().optional(),
   codes: z.array(z.string().trim().min(1).max(500)).max(10_000).optional(),
 });
 
@@ -127,14 +135,17 @@ export async function PUT(
     if (body.name !== undefined) updateData.name = body.name;
     if (body.description !== undefined) updateData.description = body.description;
     if (body.image !== undefined) updateData.image = body.image;
-    // Cambiar la puja mínima no toca una puja ya abierta: place_bid solo la usa
-    // para la primera puja.
+    // Cambiar el precio de salida no toca una puja ya abierta: place_bid solo lo
+    // usa para la primera puja.
     if (body.price !== undefined) updateData.price = body.price;
     if (body.stock !== undefined) updateData.stock = body.stock;
     if (body.value_eur !== undefined) updateData.value_eur = body.value_eur;
     if (body.requires_trade_link !== undefined) updateData.requires_trade_link = body.requires_trade_link;
     if (body.codes !== undefined) updateData.codes = body.codes;
     if (body.category !== undefined) updateData.category = body.category;
+    // La fecha solo cuenta para ABRIR la puja: cambiarla no toca una ya abierta.
+    if (body.available_from !== undefined) updateData.available_from = body.available_from;
+    if (body.counts_for_cap !== undefined) updateData.counts_for_cap = body.counts_for_cap;
 
     // La moneda no se cambia con una puja en marcha: los puntos retenidos al
     // mejor postor se devolverían en la moneda equivocada.
@@ -147,9 +158,6 @@ export async function PUT(
       }
       updateData.currency = body.currency;
     }
-    // Premio en puntos VIP: la puja mínima es siempre 1, para que se entregue.
-    if ((body.currency ?? existing.currency ?? "points") === "vip") updateData.price = 1;
-
     if (body.delivery_type !== undefined) {
       updateData.delivery_type = body.delivery_type;
       updateData.sendable = body.delivery_type === "code";
@@ -180,6 +188,9 @@ export async function PUT(
     }
     if (isMissingColumn(error, "currency")) {
       return NextResponse.json({ error: VIP_MIGRATION_ERROR }, { status: 409 });
+    }
+    if (isMissingAuctionRulesColumn(error)) {
+      return NextResponse.json({ error: AUCTION_RULES_MIGRATION_ERROR }, { status: 409 });
     }
     console.error("Error updating product:", error);
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });

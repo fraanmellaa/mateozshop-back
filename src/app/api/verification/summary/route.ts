@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 
 import { VipUnavailableError } from "@/app/utils/points/vip";
 import { getShopSettings } from "@/app/utils/shop/settings";
-import { vipBidsOpen } from "@/app/utils/shop/schema";
+import { getProducts } from "@/app/utils/products";
 import { countVerifiedUsers } from "@/app/utils/verification";
 
 // Datos públicos de la página de verificación: cuántas cuentas hay verificadas,
-// los puntos VIP por minuto de cada tramo y cuándo se abren las pujas VIP.
+// los puntos VIP por minuto de cada tramo y cuándo se abren las pujas VIP. Cada
+// premio VIP tiene su propia fecha (migración 0039): `vip_open` dice si alguno
+// se puede pujar ya y `vip_opens_at` es la primera apertura que queda por llegar.
 export async function GET() {
   try {
     const settings = await getShopSettings();
@@ -19,8 +21,13 @@ export async function GET() {
       available = false; // falta la migración 0032
     }
 
-    const now = Math.floor(Date.now() / 1000);
-    const open = vipBidsOpen(settings.vipOpensAt, now);
+    const vipProducts = (await getProducts().catch(() => [])).filter(
+      (product) => product.currency === "vip" && product.stock > 0
+    );
+    const open = vipProducts.some((product) => product.open);
+    const upcoming = vipProducts
+      .map((product) => product.opens_at)
+      .filter((value): value is number => typeof value === "number");
     return NextResponse.json({
       success: true,
       data: {
@@ -28,7 +35,7 @@ export async function GET() {
         verified,
         rates: [settings.vipPointsPerMinute, settings.vipPointsPerMinuteTwo, settings.vipPointsPerMinuteThree],
         vip_open: open,
-        vip_opens_at: !open && settings.vipOpensAt > now ? settings.vipOpensAt : null,
+        vip_opens_at: !open && upcoming.length > 0 ? Math.min(...upcoming) : null,
       },
     });
   } catch (error) {

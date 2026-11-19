@@ -19,9 +19,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { boxRuleIssues, WEIGHT_FIELDS, weightsSum } from "@/app/utils/lootBoxes/rules";
 import { RARITY_LABELS, WEIGHTS_TOTAL, type AdminBox } from "@/app/utils/lootBoxes/types";
 
+import ImageField from "./ImageField";
 import { errorMessage } from "./shared";
 
 const num = (text: string) => (text.trim() === "" ? NaN : Number(text));
+
+// En el formulario las probabilidades se escriben en porcentaje (70, 22,5...);
+// se guardan en puntos básicos (7000, 2250), que es como las usa el sorteo.
+const toPct = (weight: number) => String(weight / 100);
+const fmtPct = (weight: number) => (weight / 100).toLocaleString("es-ES", { maximumFractionDigits: 2 });
+const toWeight = (text: string) => {
+  const pct = num(text.replace(",", "."));
+  return Number.isFinite(pct) ? Math.round(pct * 100) : NaN;
+};
 
 export default function BoxModal({
   box,
@@ -37,21 +47,22 @@ export default function BoxModal({
     description: box?.description ?? "",
     image: box?.image ?? "",
     price: String(box?.price ?? ""),
-    weight_common: String(box?.weight_common ?? 7000),
-    weight_rare: String(box?.weight_rare ?? 2200),
-    weight_epic: String(box?.weight_epic ?? 700),
-    weight_legendary: String(box?.weight_legendary ?? 100),
+    weight_common: toPct(box?.weight_common ?? 7000),
+    weight_rare: toPct(box?.weight_rare ?? 2200),
+    weight_epic: toPct(box?.weight_epic ?? 700),
+    weight_legendary: toPct(box?.weight_legendary ?? 100),
     position: String(box?.position ?? 0),
     is_active: box?.is_active ?? false,
   });
   const [serverError, setServerError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const weights = {
-    weight_common: num(form.weight_common),
-    weight_rare: num(form.weight_rare),
-    weight_epic: num(form.weight_epic),
-    weight_legendary: num(form.weight_legendary),
+    weight_common: toWeight(form.weight_common),
+    weight_rare: toWeight(form.weight_rare),
+    weight_epic: toWeight(form.weight_epic),
+    weight_legendary: toWeight(form.weight_legendary),
   };
   const sum = weightsSum(weights);
   const sumOk = sum === WEIGHTS_TOTAL;
@@ -96,8 +107,8 @@ export default function BoxModal({
         <DialogHeader>
           <DialogTitle>{box ? "Editar caja" : "Nueva caja"}</DialogTitle>
           <DialogDescription>
-            Los cuatro pesos son la probabilidad de cada categoría en puntos básicos y deben sumar
-            exactamente {WEIGHTS_TOTAL} (100 %).
+            Pon la probabilidad de cada categoría en porcentaje: las cuatro tienen que sumar 100 %.
+            Dentro de cada categoría, el premio se reparte según el peso de cada premio.
           </DialogDescription>
         </DialogHeader>
 
@@ -119,14 +130,16 @@ export default function BoxModal({
               onChange={(e) => setForm({ ...form, description: e.target.value })}
             />
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">Imagen URL</Label>
-            <Input
-              type="url"
-              className="col-span-3"
-              value={form.image}
-              onChange={(e) => setForm({ ...form, image: e.target.value })}
-            />
+          <div className="grid grid-cols-4 items-start gap-4">
+            <Label className="pt-2 text-right">Ilustración</Label>
+            <div className="col-span-3">
+              <ImageField
+                value={form.image}
+                onChange={(image) => setForm((f) => ({ ...f, image }))}
+                onBusy={setUploading}
+                emptyHint="Sin imagen, la web dibuja una caja con su color."
+              />
+            </div>
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Label className="text-right">Precio (pts)</Label>
@@ -142,20 +155,19 @@ export default function BoxModal({
 
           <div className="rounded-md border p-3 space-y-3">
             {WEIGHT_FIELDS.map(({ key, rarity }) => {
-              const value = weights[key];
-              const pct = Number.isFinite(value) ? (value / 100).toFixed(2) : "—";
               return (
                 <div key={key} className="grid grid-cols-4 items-center gap-4">
                   <Label className="text-right">{RARITY_LABELS[rarity]}</Label>
                   <Input
                     type="number"
                     min={0}
-                    max={WEIGHTS_TOTAL}
+                    max={100}
+                    step={0.01}
                     value={form[key]}
                     onChange={(e) => setForm({ ...form, [key]: e.target.value })}
                     required
                   />
-                  <span className="col-span-2 text-sm text-muted-foreground">{pct} %</span>
+                  <span className="col-span-2 text-sm text-muted-foreground">% de las aperturas</span>
                 </div>
               );
             })}
@@ -163,14 +175,14 @@ export default function BoxModal({
               className={`text-sm font-medium ${sumOk ? "text-green-400" : "text-destructive"}`}
               aria-live="polite"
             >
-              Suma: {Number.isFinite(sum) ? sum : "—"} / {WEIGHTS_TOTAL}
+              Suma: {Number.isFinite(sum) ? `${fmtPct(sum)} %` : "—"} de 100 %
               {sumOk
                 ? " — correcto"
                 : Number.isFinite(sum)
                   ? sum > WEIGHTS_TOTAL
-                    ? ` — sobran ${sum - WEIGHTS_TOTAL}`
-                    : ` — faltan ${WEIGHTS_TOTAL - sum}`
-                  : " — rellena los cuatro pesos"}
+                    ? ` — sobra un ${fmtPct(sum - WEIGHTS_TOTAL)} %`
+                    : ` — falta un ${fmtPct(WEIGHTS_TOTAL - sum)} %`
+                  : " — rellena los cuatro porcentajes"}
             </div>
           </div>
 
@@ -213,7 +225,7 @@ export default function BoxModal({
             <Button type="button" variant="outline" onClick={onClose}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={isLoading || !sumOk}>
+            <Button type="submit" disabled={isLoading || uploading || !sumOk}>
               {isLoading ? "Guardando..." : "Guardar"}
             </Button>
           </DialogFooter>

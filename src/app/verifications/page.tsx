@@ -4,6 +4,7 @@ import { SiteHeader } from "../components/Header";
 import { VipUnavailableError } from "../utils/points/vip";
 import { VIP_MIGRATION_ERROR } from "../utils/products/currency";
 import { listVerificationRequests, type AdminVerificationRequest } from "../utils/verification";
+import { getMinDepositByCasino } from "../utils/bonuses";
 import { getCasinoFunnel, type CasinoFunnelRow } from "../utils/verification/stats";
 import PageBody from "./PageBody";
 
@@ -29,11 +30,19 @@ export default async function VerificationsPage() {
     console.error("Error loading casino funnel:", error);
   }
 
+  // Depósito mínimo de cada casino: si falla, el panel enseña 30 €.
+  let minDeposits: Record<string, number> = {};
+  try {
+    minDeposits = await getMinDepositByCasino();
+  } catch (error) {
+    console.error("Error loading casino minimum deposits:", error);
+  }
+
   return (
     <div className="p-6">
       <SiteHeader title="Verificaciones" />
       <Suspense fallback={<div>Cargando solicitudes...</div>}>
-        <PageBody requests={requests} unavailable={unavailable} funnel={funnel} />
+        <PageBody requests={requests} unavailable={unavailable} funnel={funnel} minDeposits={minDeposits} />
       </Suspense>
     </div>
   );

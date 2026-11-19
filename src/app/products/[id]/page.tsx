@@ -57,7 +57,7 @@ export default async function ProductDetailPage({
                   </div>
                   <div>
                     <span className="text-sm font-medium text-muted-foreground">
-                      Puja mínima
+                      Precio de salida
                     </span>
                     <p className="text-lg font-semibold">{product.price} pts</p>
                   </div>

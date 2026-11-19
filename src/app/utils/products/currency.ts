@@ -56,5 +56,13 @@ export function isMissingVipSchema(error: unknown): boolean {
   );
 }
 
+/** true si falta alguna columna de la migración 0039 (fecha de apertura y tope). */
+export function isMissingAuctionRulesColumn(error: unknown): boolean {
+  return ["available_from", "counts_for_cap"].some((c) => isMissingColumn(error, c));
+}
+
+export const AUCTION_RULES_MIGRATION_ERROR =
+  "Para usar «Disponible desde» y «No cuenta para el tope» falta aplicar la migración 0039 en Supabase";
+
 export const VIP_MIGRATION_ERROR =
   "Para usar puntos VIP falta aplicar la migración 0032 (puntos VIP) en Supabase";

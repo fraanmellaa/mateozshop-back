@@ -16,7 +16,9 @@ export type ReviewResult =
 type ReviewRpc =
   | { action: "none"; reason: string }
   | { action: "approved"; order_id: number; user_id: number; code: string | null; product_id: number }
-  | { action: "rejected"; order_id: number; user_id: number };
+  // `refunded` es false si los puntos de la puja eran de antes de un reinicio
+  // de saldos (migración 0039); ausente con la función anterior (= devueltos).
+  | { action: "rejected"; order_id: number; user_id: number; refunded?: boolean };
 
 export async function reviewOrderCore(
   orderId: number,
@@ -71,7 +73,9 @@ export async function reviewOrderCore(
       const sent = await sendCustomEmail(
         email,
         "Tu premio no ha superado la revisión",
-        `Hemos revisado tu pedido #${result.order_id} y no podemos entregarlo.\n\nMotivo: ${cleanNote}\n\nTe hemos devuelto los puntos de la puja.`
+        `Hemos revisado tu pedido #${result.order_id} y no podemos entregarlo.\n\nMotivo: ${cleanNote}${
+          result.refunded === false ? "" : "\n\nTe hemos devuelto los puntos de la puja."
+        }`
       ).catch(() => false);
       if (!sent) console.error(`Order ${orderId}: rejection email not sent`);
     }
@@ -107,7 +111,7 @@ export async function reviewOrderCore(
   return { success: true, action: "approved" };
 }
 
-// ───────────────────── premios VIP: pasar al siguiente ─────────────────────
+// ───────────────────── premios VIP: volver a poner en puja ─────────────────────
 
 export type PassNextResult =
   | { success: true; action: "passed"; newOrderId: number; username: string | null }
@@ -126,21 +130,31 @@ type PassNextRpc =
       charged: number;
       product_id: number;
     }
-  | { action: "reopened"; order_id: number; previous_user_id: number; product_id: number; reopened: boolean };
+  | {
+      action: "reopened";
+      order_id: number;
+      previous_user_id: number;
+      product_id: number;
+      reopened: boolean;
+      /** false con la 0039 (los puntos no se devuelven); ausente con la 0035 (devueltos). */
+      refunded?: boolean;
+    };
 
 const PASS_NONE: Record<string, string> = {
   cancelled: "El pedido está cancelado",
   already_reviewed: "El pedido ya se comprobó",
-  not_vip: "Solo se puede pasar al siguiente un premio VIP",
+  not_vip: "Solo se puede volver a poner en puja un premio VIP",
   no_review: "Este pedido no está pendiente de comprobar",
   product_missing: "El premio de este pedido ya no existe",
 };
 
 /**
- * «Pasar al siguiente» (migración 0035): el ganador de una puja VIP no ha
- * podido acreditar su verificación. `order_pass_next` anula su pedido, le
- * devuelve los puntos VIP y adjudica el premio a la siguiente puja más alta; si
- * no queda nadie, el premio se vuelve a poner en puja. Aquí solo los avisos.
+ * «Volver a poner en puja» (migración 0039): el ganador de una puja VIP no ha
+ * podido acreditar su verificación. `order_pass_next` anula su pedido, NO le
+ * devuelve los puntos VIP de la puja y el premio vuelve a la tienda, cerrado
+ * hasta que se le ponga otra fecha de apertura. Aquí solo el aviso al usuario.
+ * (Con la función de la 0035, que aún pasaba el premio a la siguiente puja más
+ * alta y devolvía los puntos, se siguen enviando los avisos de entonces.)
  */
 export async function passOrderToNextCore(
   orderId: number,
@@ -164,12 +178,12 @@ export async function passOrderToNextCore(
       return { success: false, error: "Pedido no encontrado" };
     }
     console.error(`Order ${orderId}: pass to next failed`, error);
-    return { success: false, error: "Error al pasar el premio al siguiente" };
+    return { success: false, error: "Error al volver a poner el premio en puja" };
   }
 
   const result = data as PassNextRpc;
   if (result.action === "none") {
-    return { success: false, error: PASS_NONE[result.reason] ?? "No se puede pasar este pedido" };
+    return { success: false, error: PASS_NONE[result.reason] ?? "No se puede volver a poner en puja este pedido" };
   }
 
   const userIds = [result.previous_user_id, ...(result.action === "passed" ? [result.user_id] : [])];
@@ -186,7 +200,11 @@ export async function passOrderToNextCore(
     const sent = await sendCustomEmail(
       previous.email,
       "No hemos podido comprobar tu verificación",
-      `Ganaste la puja de ${productName}, pero no hemos podido comprobar tu verificación y no podemos entregártelo (pedido #${result.order_id}).\n\nTe hemos devuelto los puntos VIP de la puja.`
+      `Ganaste la puja de ${productName}, pero no hemos podido comprobar tu verificación y no podemos entregártelo (pedido #${result.order_id}).\n\n${
+        result.action === "reopened" && result.refunded === false
+          ? "El premio se vuelve a poner en puja. Los puntos VIP de esa puja no se devuelven."
+          : "Te hemos devuelto los puntos VIP de la puja."
+      }`
     ).catch(() => false);
     if (!sent) console.error(`Order ${orderId}: pass-next email to previous winner not sent`);
   }
@@ -201,7 +219,7 @@ export async function passOrderToNextCore(
       intro: `La puja ganadora de ${productName} no ha podido entregarse y el premio pasa a la siguiente puja más alta, que es la tuya. Antes de entregarlo comprobamos tu verificación; te avisaremos cuando esté listo.`,
       details: [`Premio: ${productName}`, `Tu puja: ${result.amount} puntos VIP`],
       ctaLabel: "Ver mis pedidos",
-      ctaUrl: `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://mateozshop.com"}/mi-cuenta/pedidos`,
+      ctaUrl: `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://mateoz.shop"}/mi-cuenta/pedidos`,
     }).catch(() => false);
     if (!sent) console.error(`Order ${orderId}: pass-next email to new winner not sent`);
   }

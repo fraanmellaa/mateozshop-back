@@ -29,11 +29,15 @@ export default function PageBody({
   requests,
   unavailable,
   funnel,
+  minDeposits,
 }: {
   requests: AdminVerificationRequest[];
   unavailable: string | null;
   funnel: CasinoFunnelRow[];
+  /** Depósito mínimo para verificar de cada casino (nombre en minúsculas -> euros). */
+  minDeposits: Record<string, number>;
 }) {
+  const minDepositOf = (casino: string) => minDeposits[casino.trim().toLowerCase()] ?? 30;
   const router = useRouter();
   const [tab, setTab] = useState<VerificationStatus>("pending");
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -71,7 +75,7 @@ export default function PageBody({
 
   const approve = (request: AdminVerificationRequest) => {
     const ok = window.confirm(
-      `¿Has comprobado en el panel de Betandeal que «${request.casino_username}» está en ${request.casino} y que el depósito es de 30 € o más?\n\n` +
+      `¿Has comprobado en el panel de Betandeal que «${request.casino_username}» está en ${request.casino} y que el depósito es de ${minDepositOf(request.casino)} € o más?\n\n` +
         `Al aprobar, ${request.username ?? "este usuario"} queda verificado en ese casino y se borran las dos capturas.`
     );
     if (ok) void send(request, { approve: true }, "Verificación aprobada");
@@ -211,7 +215,12 @@ export default function PageBody({
                   <td className="p-3 text-xs">
                     {r.kick_username ?? "—"} / {r.twitch_username ?? "—"}
                   </td>
-                  <td className="p-3">{r.casino}</td>
+                  <td className="p-3">
+                    {r.casino}
+                    <div className="text-xs text-muted-foreground">
+                      Depósito mínimo: {minDepositOf(r.casino)} €
+                    </div>
+                  </td>
                   <td className="p-3 font-mono">{r.casino_username}</td>
                   {tab === "pending" && (
                     <td className="p-3">

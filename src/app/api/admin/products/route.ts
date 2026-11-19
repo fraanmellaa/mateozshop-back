@@ -9,8 +9,10 @@ import {
   isMissingCategoryColumn,
 } from "@/app/utils/products/categories";
 import {
+  AUCTION_RULES_MIGRATION_ERROR,
   PRODUCT_CURRENCY_KEYS,
   VIP_MIGRATION_ERROR,
+  isMissingAuctionRulesColumn,
   isMissingColumn,
 } from "@/app/utils/products/currency";
 
@@ -43,6 +45,12 @@ const createSchema = z.object({
     .optional()
     .transform((v) => (v === "" ? null : v)),
   currency: z.enum(PRODUCT_CURRENCY_KEYS).optional(),
+  // «Disponible desde» en segundos Unix; vacío, null o 0 = sin fecha.
+  available_from: z
+    .union([z.literal(""), z.null(), z.coerce.number().int().min(0).max(4_102_444_800)])
+    .optional()
+    .transform((v) => (v === "" || v === undefined || v === 0 ? null : v)),
+  counts_for_cap: z.boolean().optional(),
   codes: z.array(z.string().trim().min(1).max(500)).max(10_000).optional(),
 });
 
@@ -53,7 +61,7 @@ export async function POST(request: NextRequest) {
     const parsed = createSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Datos no válidos: revisa nombre, imagen, puja mínima (≥ 1), stock (≥ 1) y valor en €" },
+        { error: "Datos no válidos: revisa nombre, imagen, precio de salida (≥ 1), stock (≥ 1) y valor en €" },
         { status: 400 }
       );
     }
@@ -61,8 +69,6 @@ export async function POST(request: NextRequest) {
 
     const product = await createProduct({
       ...body,
-      // Premio en puntos VIP: la puja mínima es siempre 1, para que se entregue.
-      ...(body.currency === "vip" ? { price: 1 } : {}),
       // Las skins por intercambio de Steam necesitan el enlace del ganador.
       requires_trade_link: body.delivery_type === "trade" ? true : Boolean(body.requires_trade_link),
     });
@@ -74,6 +80,9 @@ export async function POST(request: NextRequest) {
     }
     if (isMissingColumn(error, "currency")) {
       return NextResponse.json({ error: VIP_MIGRATION_ERROR }, { status: 409 });
+    }
+    if (isMissingAuctionRulesColumn(error)) {
+      return NextResponse.json({ error: AUCTION_RULES_MIGRATION_ERROR }, { status: 409 });
     }
     console.error("Error creating product:", error);
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });

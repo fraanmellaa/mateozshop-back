@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
 import { updateGiveaway, deleteGiveaway } from "@/app/utils/giveaways/admin";
+import { isValidTicketCost } from "@/app/utils/giveaways/tickets";
 
 export async function PUT(
   request: NextRequest,
@@ -45,7 +46,16 @@ export async function PUT(
 
     if (title) updateData.title = title;
     if (image) updateData.image = image;
-    if (cost) updateData.cost = parseInt(cost);
+    if (cost !== undefined && cost !== null && cost !== "") {
+      // Entero de 1 en adelante: nunca negativo, cero ni con decimales.
+      if (!isValidTicketCost(cost)) {
+        return NextResponse.json(
+          { error: "El coste del ticket debe ser un número entero de puntos, de 1 en adelante" },
+          { status: 400 }
+        );
+      }
+      updateData.cost = parseInt(cost);
+    }
     if (start_at) updateData.start_at = parseInt(start_at);
     if (end_at) updateData.end_at = parseInt(end_at);
     if (sendable !== undefined) {

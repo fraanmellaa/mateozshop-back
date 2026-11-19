@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
 import { getGiveaways, createGiveaway } from "@/app/utils/giveaways/admin";
+import { isValidTicketCost } from "@/app/utils/giveaways/tickets";
 
 export async function GET() {
   if (!(await requireAdmin())) return adminUnauthorized();
@@ -34,6 +35,15 @@ export async function POST(request: NextRequest) {
     ) {
       return NextResponse.json(
         { error: "Todos los campos son requeridos" },
+        { status: 400 }
+      );
+    }
+
+    // El ticket cuesta un número entero de puntos, al menos 1: con un coste
+    // negativo o con decimales los tickets saldrían gratis o mal cobrados.
+    if (!isValidTicketCost(cost)) {
+      return NextResponse.json(
+        { error: "El coste del ticket debe ser un número entero de puntos, de 1 en adelante" },
         { status: 400 }
       );
     }

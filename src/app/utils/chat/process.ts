@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import type { RainKind } from "@/app/utils/economy/schema";
 import { updatePlatformUsername } from "@/app/utils/users";
 
 import { getAntiFarmSettings, type AntiFarmSettings } from "./settings";
@@ -74,14 +75,15 @@ export type ChatOutcome = {
   linked: boolean;
   /** El mensaje contó como actividad. */
   counted: boolean;
-  /** Comando de lluvia pedido por alguien autorizado. */
-  command: "lluvia" | "maxwin" | null;
+  /** Evento (lluvia, big win o max win) pedido por alguien autorizado. */
+  command: RainKind | null;
 };
 
-/** Comando exacto: `!lluvia` / `!maxwin` solas (sin distinguir mayúsculas). */
-export function parseRainCommand(text: string): "lluvia" | "maxwin" | null {
+/** Comando exacto: `!lluvia`, `!bigwin` o `!maxwin` solas (sin distinguir mayúsculas). */
+export function parseRainCommand(text: string): RainKind | null {
   const word = text.trim().toLowerCase();
   if (word === "!lluvia") return "lluvia";
+  if (word === "!bigwin") return "bigwin";
   if (word === "!maxwin") return "maxwin";
   return null;
 }

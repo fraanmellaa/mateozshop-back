@@ -30,7 +30,7 @@ export async function SiteHeader({ title }: { title: string }) {
           )}
           <Button variant="ghost" asChild size="sm" className="hidden sm:flex">
             <a
-              href="https://www.mateozshop.com"
+              href="https://mateoz.shop"
               rel="noopener noreferrer"
               target="_blank"
               className="dark:text-foreground"

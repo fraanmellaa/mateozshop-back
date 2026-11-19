@@ -115,6 +115,10 @@ export default function BoxesTab({ boxes }: { boxes: AdminBox[] }) {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
+                {box.image && (
+                  // eslint-disable-next-line @next/next/no-img-element -- miniatura de la ilustración subida
+                  <img src={box.image} alt="" className="h-10 w-10 rounded object-contain" />
+                )}
                 <h2 className="text-base font-semibold">{box.name}</h2>
                 <span
                   className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -187,8 +191,14 @@ export default function BoxesTab({ boxes }: { boxes: AdminBox[] }) {
                             <div className="min-w-0">
                               <span className="font-medium">{p.name}</span>{" "}
                               <span className="text-xs text-muted-foreground">
-                                {p.kind === "points" ? `${p.points} pts` : "Objeto"} · peso {p.weight} (
-                                {share.toFixed(1)} % de su categoría) ·{" "}
+                                {p.kind === "points" ? `${p.points} pts` : "Objeto"} ·{" "}
+                                <span className="font-medium text-foreground">
+                                  {((box[weightKey(rarity)] / 100) * (share / 100)).toLocaleString("es-ES", {
+                                    maximumFractionDigits: 2,
+                                  })}{" "}
+                                  % de la caja
+                                </span>{" "}
+                                (peso {p.weight}) ·{" "}
                                 {p.stock === null ? "stock ilimitado" : `stock ${p.stock}`}
                                 {p.stock !== null && p.fallback_points !== null
                                   ? ` · respaldo ${p.fallback_points} pts`

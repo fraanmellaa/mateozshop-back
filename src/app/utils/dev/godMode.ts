@@ -115,17 +115,13 @@ export type GodBoxesState = {
   /** Día de directo de referencia (null: la BD no tiene ningún directo registrado). */
   liveDay: string | null;
   dailyBox: boolean;
-  streakBoxes: number;
   notes: string[];
 };
 
-const shiftDay = (day: string, delta: number) =>
-  new Date(Date.parse(`${day}T00:00:00Z`) + delta * DAY_SECONDS * 1000).toISOString().slice(0, 10);
-
 /**
- * Deja al usuario de pruebas con una caja diaria y una de racha disponibles.
- * Solo escribe filas SUYAS (user_watch_days, daily_box_claims, user_streaks,
- * streak_box_entitlements); no toca tablas globales ni funciones SQL.
+ * Deja al usuario de pruebas con la caja diaria disponible y una racha viva.
+ * Solo escribe filas SUYAS (user_watch_days, daily_box_claims, user_streaks);
+ * no toca tablas globales ni funciones SQL.
  */
 export async function prepareGodBoxes(): Promise<GodBoxesState> {
   assertGodMode();
@@ -167,8 +163,8 @@ export async function prepareGodBoxes(): Promise<GodBoxesState> {
     }
     dailyBox = true;
 
-    // Racha viva y con bonus: su último día es el día de directo de referencia.
-    const current = Math.max(settings.streak.bonusFromDay, settings.streak.boxEveryDays);
+    // Racha viva de varios días: su último día es el día de directo de referencia.
+    const current = 4;
     const prev = await supabase
       .from("user_streaks")
       .select("best_streak")
@@ -192,36 +188,5 @@ export async function prepareGodBoxes(): Promise<GodBoxesState> {
     );
   }
 
-  // Caja de racha: una entrada sin abrir. (user_id, day) es único, así que se
-  // busca un día libre hacia atrás desde el de referencia.
-  const pending = await supabase
-    .from("streak_box_entitlements")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .is("opened_at", null);
-  if (pending.error) throw pending.error;
-
-  let streakBoxes = pending.count ?? 0;
-  if (streakBoxes < 1) {
-    const used = await supabase
-      .from("streak_box_entitlements")
-      .select("day")
-      .eq("user_id", userId);
-    if (used.error) throw used.error;
-    const taken = new Set((used.data ?? []).map((row: { day: string }) => String(row.day)));
-
-    let day = liveDay ?? today;
-    while (taken.has(day)) day = shiftDay(day, -1);
-
-    const grant = await supabase.from("streak_box_entitlements").insert({
-      user_id: userId,
-      day,
-      streak_days: settings.streak.boxEveryDays,
-      granted_at: nowSec,
-    });
-    if (grant.error) throw grant.error;
-    streakBoxes = 1;
-  }
-
-  return { liveDay, dailyBox, streakBoxes, notes };
+  return { liveDay, dailyBox, notes };
 }

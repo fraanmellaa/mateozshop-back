@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { syncLiveState } from "@/app/utils/live";
 
 /**
  * Pujas: llamada a `place_bid` (migración 0023) y traducción de sus errores.
@@ -21,6 +22,10 @@ export type ShopBidErrorCode =
   | "ADULT_REQUIRED"
   | "VERIFIED_REQUIRED"
   | "VIP_NOT_OPEN"
+  | "NOT_AVAILABLE_YET"
+  | "STREAM_OFFLINE"
+  | "MAX_OPEN_AUCTIONS"
+  | "MONTH_CLOSING"
   | "VIP_WIN_CAP_REACHED"
   | "VIP_ALREADY_LEADING"
   | "USER_ACCOUNT_NOT_LINKED"
@@ -43,8 +48,16 @@ const STATUS: Record<ShopBidErrorCode, number> = {
   ADULT_REQUIRED: 403,
   // Premio en puntos VIP y el usuario no está verificado (migración 0032).
   VERIFIED_REQUIRED: 403,
-  // Las pujas VIP se abren en el último directo del mes (ajuste vipOpensAt).
+  // Cada premio VIP se abre en su fecha y solo durante su directo (migración 0039).
   VIP_NOT_OPEN: 409,
+  // Abrir una puja (primera oferta), migración 0039: el premio aún no ha
+  // llegado a su fecha «disponible desde»; no hay directo; ya hay el máximo de
+  // pujas normales abiertas; o es el cierre de mes (último día desde las 23:00,
+  // o reinicio mensual sin terminar).
+  NOT_AVAILABLE_YET: 409,
+  STREAM_OFFLINE: 409,
+  MAX_OPEN_AUCTIONS: 409,
+  MONTH_CLOSING: 409,
   // Como mucho un premio VIP por persona y mes: ya ganó uno, o lidera otro.
   VIP_WIN_CAP_REACHED: 409,
   VIP_ALREADY_LEADING: 409,
@@ -87,6 +100,8 @@ export type PlaceBidResult = {
   balance: number;
   /** Moneda del premio; ausente si falta la migración 0032 (= puntos normales). */
   currency?: "points" | "vip";
+  /** true si esta puja ha abierto la puja (primera oferta). Ausente sin la 0039. */
+  opened?: boolean;
 };
 
 /** Puja reteniendo puntos y devolviendo los del superado, todo en una transacción. */
@@ -108,6 +123,35 @@ export async function placeBid(userId: number, productId: number, amount: number
   return data as PlaceBidResult;
 }
 
+const LIVE_RECHECK_MS = 15_000;
+let lastLiveRecheck = 0;
+
+/**
+ * `place_bid` solo deja abrir una puja con el directo encendido, y eso lo sabe
+ * por `stream_sessions`, que actualiza el tick de cada minuto. Si alguien abre
+ * una puja justo al empezar el directo, el tick puede no haberlo visto todavía:
+ * ante un STREAM_OFFLINE se vuelve a consultar Kick y Twitch (como mucho cada
+ * 15 s por instancia) y, si hay directo, se reintenta la puja una vez.
+ */
+export async function placeBidWhenLive(userId: number, productId: number, amount: number) {
+  try {
+    return await placeBid(userId, productId, amount);
+  } catch (error) {
+    if (!(error instanceof ShopBidError) || error.code !== "STREAM_OFFLINE") throw error;
+    if (Date.now() - lastLiveRecheck < LIVE_RECHECK_MS) throw error;
+    lastLiveRecheck = Date.now();
+
+    let live = false;
+    try {
+      live = (await syncLiveState()).live;
+    } catch (syncError) {
+      console.error("Error rechecking live state before a bid:", syncError);
+    }
+    if (!live) throw error;
+    return placeBid(userId, productId, amount);
+  }
+}
+
 /** Respuesta HTTP de un error de negocio de la puja, o null si no lo es. */
 export function shopBidErrorResponse(error: unknown): NextResponse | null {
   if (!(error instanceof ShopBidError)) return null;
@@ -121,10 +165,31 @@ export function shopBidErrorResponse(error: unknown): NextResponse | null {
     if (error.code === "BID_TOO_LOW") extra = { minBid: n };
     else if (error.code === "ACCOUNT_TOO_NEW") extra = { minDays: n };
     else if (error.code === "MONTHLY_WIN_CAP_REACHED") extra = { cap: n };
+    else if (error.code === "MAX_OPEN_AUCTIONS") extra = { maxOpen: n };
+    else if (error.code === "NOT_AVAILABLE_YET") extra = { availableFrom: n };
   }
 
   return NextResponse.json(
     { success: false, error: code, ...extra },
     { status: STATUS[error.code] }
   );
+}
+
+/**
+ * ¿Se retuvieron estos puntos antes de un reinicio de saldos? Si es así ya no
+ * existen y no se devuelven (`auction_hold_voided`, migración 0039). Sin la
+ * migración responde false: se devuelve como hasta ahora.
+ */
+export async function isHoldVoided(heldAt: number, currency: "points" | "vip"): Promise<boolean> {
+  const { data, error } = await getSupabaseAdmin().rpc("auction_hold_voided", {
+    p_held_at: heldAt,
+    p_currency: currency,
+  });
+  if (error) {
+    if (error.code !== "PGRST202" && error.code !== "42883") {
+      console.error("Error checking if a bid hold is voided:", error);
+    }
+    return false;
+  }
+  return data === true;
 }

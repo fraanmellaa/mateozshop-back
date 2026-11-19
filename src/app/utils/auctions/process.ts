@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { sendWinnerNotificationEmail } from "@/app/utils/email";
 import { publishBidUpdated, publishUserNotification } from "@/app/utils/realtime";
+import { purgePastAuctionsCache } from "@/app/utils/frontendCache";
 
 /**
  * Ciclo de vida de una subasta (`products.auction_status`):
@@ -47,7 +48,7 @@ export type SettleOutcome = SettleResult["action"];
 
 function appUrl(path: string) {
   const base =
-    process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://mateozshop.com";
+    process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://mateoz.shop";
   return `${base}${path}`;
 }
 
@@ -223,7 +224,11 @@ async function afterReleased(result: Extract<SettleResult, { action: "released" 
       discordId: user.discord_id,
       type: "auction_finished",
       title: "Puja sin adjudicar",
-      body: `La puja por ${product.name} no se te ha adjudicado porque ${why}. Te hemos devuelto tus ${result.amount} puntos.`,
+      // `amount` es lo devuelto: 0 si esos puntos eran de antes de un reinicio de saldos.
+      body:
+        result.amount > 0
+          ? `La puja por ${product.name} no se te ha adjudicado porque ${why}. Te hemos devuelto tus ${result.amount} puntos.`
+          : `La puja por ${product.name} no se te ha adjudicado porque ${why}.`,
       productId: product.id,
       productName: product.name,
       productImage: product.image,
@@ -364,4 +369,50 @@ export async function processAuctionsTick() {
   // El cron purga la caché del front cuando hay algo que ha cambiado de estado.
   result.finalized = result.awarded + result.released;
   return result;
+}
+
+// ───────────────────────── cierre al vuelo ─────────────────────────
+
+const SETTLE_EVERY_MS = 8000;
+let lastSettleCheck = 0;
+let settleRunning: Promise<void> | null = null;
+
+/**
+ * Cierra las pujas vencidas sin esperar al cron, que en Vercel solo pasa una
+ * vez al día: sin esto, una puja terminada se queda horas en «Adjudicando».
+ * Se llama al pedir la lista de premios. Como mucho hace una comprobación cada
+ * 8 s por instancia y, si ya hay un cierre en marcha, espera a ese. Adjudicar
+ * es idempotente (auction_settle), así que no importa que coincida con el cron
+ * o con otra instancia. Nunca lanza: si falla, la lista se sirve igual.
+ */
+export function settleDueAuctionsNow(): Promise<void> {
+  if (settleRunning) return settleRunning;
+  if (Date.now() - lastSettleCheck < SETTLE_EVERY_MS) return Promise.resolve();
+  lastSettleCheck = Date.now();
+
+  settleRunning = (async () => {
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const { count, error } = await getSupabaseAdmin()
+        .from("products")
+        .select("id", { count: "exact", head: true })
+        .eq("is_auction", true)
+        .in("auction_status", ["in_progress", "finalizing"])
+        .or(`auction_status.eq.finalizing,auction_ends_at.lte.${now}`);
+      if (error) throw error;
+      if (!count) return;
+
+      const result = await processAuctionsTick();
+      if (result.finalized > 0) {
+        await purgePastAuctionsCache().catch((purgeError) =>
+          console.error("[auctions] no se pudo purgar la caché del front:", purgeError)
+        );
+      }
+    } catch (error) {
+      console.error("[auctions] cierre al vuelo fallido:", error);
+    } finally {
+      settleRunning = null;
+    }
+  })();
+  return settleRunning;
 }

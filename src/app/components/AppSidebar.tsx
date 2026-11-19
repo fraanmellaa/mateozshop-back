@@ -18,6 +18,8 @@ import {
   Megaphone,
   Scale,
   BadgeCheck,
+  Vote,
+  ChartColumn,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -88,9 +90,19 @@ const items = [
     icon: Coins,
   },
   {
+    title: "Números",
+    url: "/stats",
+    icon: ChartColumn,
+  },
+  {
     title: "Torneos",
     url: "/tournaments",
     icon: Swords,
+  },
+  {
+    title: "Predicciones",
+    url: "/stream-predictions",
+    icon: Vote,
   },
   {
     title: "Pronósticos",

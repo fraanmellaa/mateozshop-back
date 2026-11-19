@@ -84,7 +84,7 @@ export async function isResetBlocking(): Promise<boolean> {
  *
  * Orden (cada paso con su marca en monthly_resets, idempotente y reanudable):
  *  1. guardar el top 50 del mes anterior desde point_transactions
- *  2. cerrar las subastas del mes
+ *  2. cerrar las subastas del mes (ninguna puja con puntos retenidos sobrevive)
  *  3. cerrar los sorteos del mes
  *  4. poner todos los saldos a 0 (un movimiento `monthly_reset` por usuario)
  *  5. conceder los puntos del leaderboard y el multiplicador del mes nuevo
@@ -143,12 +143,15 @@ export async function runMonthlyReset(options: { force?: boolean } = {}): Promis
       p_limit: 50,
     });
 
-    // 2. Subastas.
+    // 2. Subastas. Se repite mientras los saldos no estén a cero: el reinicio de
+    // saldos (economy_reset_balances, migración 0039) se niega a empezar si
+    // queda alguna puja con puntos retenidos, y al reanudar hay que volver a
+    // cerrarlas. Es idempotente: sin pujas abiertas no hace nada.
     step = "auctions";
-    if (!row.auctions_closed_at) {
+    if (!row.auctions_closed_at || !row.balances_reset_at) {
       const { closed } = await closeMonthAuctions();
       steps.auctions = closed;
-      await mark({ auctions_closed_at: nowSec(), auctions_closed: closed });
+      await mark({ auctions_closed_at: nowSec(), auctions_closed: (row.auctions_closed ?? 0) + closed });
     }
 
     // 3. Sorteos.

@@ -37,6 +37,15 @@ function mergeWithDefaults(stored: unknown) {
       out[key] = merged;
     }
   }
+
+  // La caja diaria solo da puntos. Si lo guardado es anterior a ese cambio
+  // (algún tramo con objeto), valen los tramos por defecto en vez de dar por
+  // inválidos todos los ajustes.
+  const daily = out.dailyBox;
+  const tiers = isRecord(daily) ? daily.tiers : null;
+  if (!Array.isArray(tiers) || tiers.some((t) => !isRecord(t) || t.kind !== "points")) {
+    out.dailyBox = defaults.dailyBox;
+  }
   return out;
 }
 

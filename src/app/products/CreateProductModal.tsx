@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PRODUCT_CATEGORIES } from "@/app/utils/products/categories";
 import { PRODUCT_CURRENCIES } from "@/app/utils/products/currency";
+import { fromDateTimeLocal } from "@/app/utils/datetime";
 
 const EMPTY_FORM = {
   name: "",
@@ -27,6 +28,9 @@ const EMPTY_FORM = {
   requires_trade_link: false,
   category: "",
   currency: "points",
+  // «Disponible desde» como fecha y hora local ("" = sin fecha).
+  available_from: "",
+  counts_for_cap: true,
   codesText: "",
 };
 
@@ -70,6 +74,9 @@ export default function CreateProductModal({
           category: formData.category,
           // Solo se manda si es VIP: así se pueden crear premios aunque falte la 0032.
           ...(formData.currency === "vip" ? { currency: "vip" } : {}),
+          // Igual con la fecha y el tope (migración 0039): solo si se han tocado.
+          ...(formData.available_from ? { available_from: fromDateTimeLocal(formData.available_from) } : {}),
+          ...(formData.counts_for_cap ? {} : { counts_for_cap: false }),
           codes,
         }),
       });
@@ -138,7 +145,7 @@ export default function CreateProductModal({
           </div>
 
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">Puja mínima (pts)</Label>
+            <Label className="text-right">Precio de salida (pts)</Label>
             <Input
               type="number"
               min={1}
@@ -208,8 +215,36 @@ export default function CreateProductModal({
                 ))}
               </select>
               <p className="mt-1 text-xs text-muted-foreground">
-                Con puntos VIP solo pujan los usuarios verificados, el premio sale en «Verificados» y la puja mínima es siempre 1 punto VIP.
+                Con puntos VIP solo pujan los usuarios verificados y el premio sale en «Verificados». El precio de salida es el de arriba, en puntos VIP.
               </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right">Disponible desde</Label>
+            <div className="col-span-3">
+              <Input
+                type="datetime-local"
+                value={formData.available_from}
+                onChange={(e) => setFormData({ ...formData, available_from: e.target.value })}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {formData.currency === "vip"
+                  ? "Fecha de apertura de este premio VIP: se puede pujar en el primer directo que haya desde esa fecha. Sin fecha, está cerrado."
+                  : "Antes de esa fecha el premio se ve en la tienda con «Se abre el…» y no se puede pujar. Vacío = disponible ya."}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right">Tope mensual</Label>
+            <div className="col-span-3 flex items-center gap-2">
+              <Checkbox
+                checked={!formData.counts_for_cap}
+                disabled={formData.currency === "vip"}
+                onCheckedChange={(v) => setFormData({ ...formData, counts_for_cap: !v })}
+              />
+              <span className="text-sm">No cuenta para el tope de premios al mes</span>
             </div>
           </div>
 

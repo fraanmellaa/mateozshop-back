@@ -25,6 +25,7 @@ import {
   type Rarity,
 } from "@/app/utils/lootBoxes/types";
 
+import ImageField from "./ImageField";
 import { RARITY_STYLES, errorMessage, selectClass } from "./shared";
 
 export default function PrizeModal({
@@ -53,6 +54,16 @@ export default function PrizeModal({
   });
   const [serverError, setServerError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  // Probabilidad real de este premio en la caja: la de su categoría repartida
+  // entre los premios activos de esa categoría según su peso.
+  const myWeight = form.is_active ? Math.max(0, Number(form.weight) || 0) : 0;
+  const othersWeight = box.prizes
+    .filter((p) => p.rarity === form.rarity && p.is_active && p.id !== prize?.id)
+    .reduce((sum, p) => sum + p.weight, 0);
+  const rarityPct = box[`weight_${form.rarity}` as const] / 100;
+  const realPct = myWeight + othersWeight > 0 ? (rarityPct * myWeight) / (myWeight + othersWeight) : 0;
 
   const setRarity = (rarity: Rarity) =>
     setForm((f) => ({ ...f, rarity, kind: rarity === "common" ? "points" : f.kind }));
@@ -171,14 +182,16 @@ export default function PrizeModal({
               onChange={(e) => setForm({ ...form, description: e.target.value })}
             />
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">Imagen URL</Label>
-            <Input
-              type="url"
-              className="col-span-3"
-              value={form.image}
-              onChange={(e) => setForm({ ...form, image: e.target.value })}
-            />
+          <div className="grid grid-cols-4 items-start gap-4">
+            <Label className="pt-2 text-right">Ilustración</Label>
+            <div className="col-span-3">
+              <ImageField
+                value={form.image}
+                onChange={(image) => setForm((f) => ({ ...f, image }))}
+                onBusy={setUploading}
+                emptyHint="Sin imagen, los premios de puntos salen con la moneda."
+              />
+            </div>
           </div>
           {form.kind === "points" && (
             <div className="grid grid-cols-4 items-center gap-4">
@@ -204,7 +217,12 @@ export default function PrizeModal({
                 required
               />
               <p className="mt-1 text-xs text-muted-foreground">
-                Peso relativo dentro de su categoría (2 sale el doble que 1).
+                Peso relativo dentro de su categoría (2 sale el doble que 1). Con este peso, el premio
+                sale en el{" "}
+                <span className="font-medium text-foreground">
+                  {realPct.toLocaleString("es-ES", { maximumFractionDigits: 2 })} %
+                </span>{" "}
+                de las aperturas de la caja.
               </p>
             </div>
           </div>
@@ -270,7 +288,7 @@ export default function PrizeModal({
             <Button type="button" variant="outline" onClick={onClose}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={isLoading || liveIssue !== null}>
+            <Button type="submit" disabled={isLoading || uploading || liveIssue !== null}>
               {isLoading ? "Guardando..." : "Guardar"}
             </Button>
           </DialogFooter>

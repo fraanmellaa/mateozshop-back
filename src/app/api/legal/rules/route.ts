@@ -5,6 +5,7 @@ import { getPublicGamesRules } from "@/app/utils/games/rules";
 import { getPublicGiveawayRules } from "@/app/utils/giveaways/rules";
 import { getLootBoxOdds } from "@/app/utils/lootBoxes";
 import { getPublicShopRules } from "@/app/utils/shop/rules";
+import { getPublicStreamPredictionRules } from "@/app/utils/streamPredictions";
 
 /** Cada bloque va protegido: si uno falla, ese bloque es null y los demás siguen. */
 async function safe<T>(name: string, load: () => Promise<T>): Promise<T | null> {
@@ -17,7 +18,9 @@ async function safe<T>(name: string, load: () => Promise<T>): Promise<T | null> 
 }
 
 export async function GET() {
-  const [economy, shop, games, boxes, giveaways] = await Promise.all([
+  const [predictions, economy, shop, games, boxes, giveaways] = await Promise.all([
+    // Predicciones del directo: puntos del ganador y máximo por directo.
+    safe("predictions", () => getPublicStreamPredictionRules()),
     safe("economy", () => getPublicEconomyRules()),
     safe("shop", () => getPublicShopRules()),
     safe("games", () => getPublicGamesRules()),
@@ -27,6 +30,6 @@ export async function GET() {
 
   return NextResponse.json({
     success: true,
-    data: { economy, shop, games, boxes, giveaways },
+    data: { economy, shop, games, boxes, giveaways, predictions },
   });
 }

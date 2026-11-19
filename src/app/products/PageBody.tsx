@@ -124,7 +124,7 @@ export default function PageBody({ products }: { products: ProductRow[] }) {
     },
     {
       accessorKey: "price",
-      header: () => <div className="text-left">Puja mínima</div>,
+      header: () => <div className="text-left">Precio de salida</div>,
       cell: ({ row }) => (
         <div className="text-left font-medium">{row.getValue("price")} pts</div>
       ),

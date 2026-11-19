@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { ColumnDef } from "@tanstack/react-table";
 import { DecoratedOrder } from "../utils/orders/types";
 import { Button } from "@/components/ui/button";
-import { ArrowUpDown, Eye, MoreHorizontal } from "lucide-react";
+import { ArrowUpDown, Eye, MoreHorizontal, TriangleAlert } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -193,6 +193,17 @@ export default function PageBody({ allOrders }: { allOrders: DecoratedOrder[] })
                     : "Pendiente de revisión"}
               </div>
             )}
+            {o.duplicate_flags.length > 0 && (
+              <div
+                className="mt-1 inline-flex items-center gap-1 rounded border border-amber-500/50 bg-amber-500/10 px-1.5 py-0.5 text-xs font-medium text-amber-300"
+                title={o.duplicate_flags
+                  .map((flag) => `${flag.text}: ${flag.users.map((user) => user.username).join(", ")}`)
+                  .join("\n")}
+              >
+                <TriangleAlert className="h-3 w-3" />
+                Posible cuenta repetida
+              </div>
+            )}
           </div>
         );
       },
@@ -279,7 +290,7 @@ export default function PageBody({ allOrders }: { allOrders: DecoratedOrder[] })
                     <DropdownMenuItem
                       onClick={() => setReview({ id: order.id, approve: false, vip: true, next: true })}
                     >
-                      Pasar al siguiente
+                      Volver a poner en puja
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem

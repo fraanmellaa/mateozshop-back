@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { fetchAllRows } from "@/app/utils/giveaways/fetchAll";
+import { getOrderDuplicateFlags, getOrderWinnerSnapshot } from "./duplicates";
 import { DecoratedOrder, OrderDetail, UserOrder } from "./types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -32,12 +33,16 @@ export const getOrders = async (): Promise<DecoratedOrder[]> => {
       .range(from, to)
   );
 
+  // Avisos de cuentas repetidas: si fallan, la lista sale sin ellos.
+  const flags = await getOrderDuplicateFlags();
+
   return orders.map((order) => {
     const user = one(order.user);
     const product = one(order.product);
 
     return {
       id: order.id,
+      duplicate_flags: flags.get(order.id) ?? [],
       username: user?.username ?? "",
       product_name: product?.name ?? "",
       product_image: product?.image ?? "",
@@ -88,9 +93,15 @@ export const getOrderById = async (orderId: number): Promise<OrderDetail | null>
 
   const user = one(order.user);
   const product = one(order.product);
+  const [winner, flags] = await Promise.all([
+    getOrderWinnerSnapshot(order.id),
+    getOrderDuplicateFlags([order.id]),
+  ]);
 
   return {
     id: order.id,
+    winner,
+    duplicate_flags: flags.get(order.id) ?? [],
     status: order.status,
     total: order.total,
     created_at: new Date(order.created_at * 1000).toISOString(),

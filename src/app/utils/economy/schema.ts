@@ -12,16 +12,16 @@ const MAX_POINTS = 1_000_000;
 
 /** Cajas: los pesos de la caja diaria se expresan en puntos básicos (suman 10.000). */
 export const DAILY_BOX_TOTAL_WEIGHT = 10_000;
-export const DAILY_TIER_IDS = ["common", "rare", "epic", "legendary"] as const;
-export type DailyTierId = (typeof DAILY_TIER_IDS)[number];
 
 const int = (min: number, max: number) => z.number().int().min(min).max(max);
 
 const label = z.string().trim().min(1, "Obligatorio").max(40);
 
-const dailyPointsTier = z
+// La caja diaria solo da puntos (economía final, nov 2026): un tramo es una
+// cantidad de puntos (o un rango) con su probabilidad.
+const dailyTier = z
   .object({
-    id: z.enum(DAILY_TIER_IDS),
+    id: z.string().trim().min(1).max(20),
     label,
     /** Puntos básicos sobre 10.000. */
     weight: int(0, DAILY_BOX_TOTAL_WEIGHT),
@@ -33,26 +33,6 @@ const dailyPointsTier = z
     message: "El mínimo no puede superar el máximo",
     path: ["pointsMin"],
   });
-
-const dailyItemTier = z.object({
-  id: z.enum(DAILY_TIER_IDS),
-  label,
-  weight: int(0, DAILY_BOX_TOTAL_WEIGHT),
-  kind: z.literal("item"),
-  name: z.string().trim().min(1, "Obligatorio").max(80),
-  /** Unidades que se pueden entregar cada mes. 0 = siempre puntos de respaldo. */
-  monthlyStock: int(0, 1000),
-  /** Puntos que se dan si el objeto se ha agotado. */
-  fallbackPoints: int(1, MAX_POINTS),
-});
-
-const dailyTier = z.discriminatedUnion("kind", [dailyPointsTier, dailyItemTier]);
-
-const streakTier = z.object({
-  points: int(1, MAX_POINTS),
-  /** Peso relativo (60/30/9/1 = porcentajes). */
-  weight: int(1, 10_000),
-});
 
 const rainKind = z.object({
   points: int(0, 100_000),
@@ -93,18 +73,29 @@ export const economySettingsSchema = z
       streak: int(1, 240),
       dailyBox: int(1, 240),
     }),
+    // Puntos de racha: cada día de directo que se llega a `minutes.streak` se
+    // cobra `dailyFirst` el día 1 y `dailyStep` más cada día, hasta `dailyMax`.
+    // Cada `weeklyEveryDays` días seguidos se cobra además `weeklyPoints`.
     streak: z.object({
-      bonusFromDay: int(1, 365),
-      bonusPct: int(0, 100),
-      boxEveryDays: int(1, 365),
-      boxTiers: z.array(streakTier).min(1).max(8),
+      dailyFirst: int(0, MAX_POINTS),
+      dailyStep: int(0, MAX_POINTS),
+      dailyMax: int(0, MAX_POINTS),
+      /** 0 = sin extra semanal. */
+      weeklyEveryDays: int(0, 365),
+      weeklyPoints: int(0, MAX_POINTS),
     }),
     dailyBox: z.object({
-      tiers: z.array(dailyTier).min(1).max(4),
+      tiers: z.array(dailyTier).min(1).max(8),
     }),
+    // Eventos del directo: !lluvia, !bigwin y !maxwin.
     rain: z.object({
       lluvia: rainKind,
+      bigwin: rainKind,
       maxwin: rainKind,
+    }),
+    tiktok: z.object({
+      /** Premio mensual del ranking de TikTok: puntos del 1.º, 2.º y 3.º. */
+      monthlyPrizes: z.tuple([int(0, MAX_POINTS), int(0, MAX_POINTS), int(0, MAX_POINTS)]),
     }),
     leaderboard: z.object({
       scale: z.array(scaleStep).min(1).max(10),
@@ -119,7 +110,7 @@ export const economySettingsSchema = z
     if (total !== DAILY_BOX_TOTAL_WEIGHT) {
       ctx.addIssue({
         code: "custom",
-        message: `Los pesos de la caja diaria suman ${total} y tienen que sumar ${DAILY_BOX_TOTAL_WEIGHT}`,
+        message: `Las probabilidades de la caja diaria suman ${total / 100} % y tienen que sumar 100 %`,
         path: ["dailyBox", "tiers"],
       });
     }
@@ -148,9 +139,9 @@ export const economySettingsSchema = z
 
 export type EconomySettings = z.infer<typeof economySettingsSchema>;
 export type DailyTier = EconomySettings["dailyBox"]["tiers"][number];
-export type StreakTier = EconomySettings["streak"]["boxTiers"][number];
 export type ScaleStep = EconomySettings["leaderboard"]["scale"][number];
-export type RainKind = "lluvia" | "maxwin";
+export const RAIN_KINDS = ["lluvia", "bigwin", "maxwin"] as const;
+export type RainKind = (typeof RAIN_KINDS)[number];
 
 export const DEFAULT_ECONOMY_SETTINGS: EconomySettings = {
   watch: { pointsPerMinute: 10, chatWindowMinutes: 15 },
@@ -161,37 +152,23 @@ export const DEFAULT_ECONOMY_SETTINGS: EconomySettings = {
     minGapSeconds: 15,
   },
   minutes: { streak: 20, dailyBox: 15 },
-  streak: {
-    bonusFromDay: 7,
-    bonusPct: 10,
-    boxEveryDays: 7,
-    boxTiers: [
-      { points: 1000, weight: 60 },
-      { points: 3000, weight: 30 },
-      { points: 6000, weight: 9 },
-      { points: 10000, weight: 1 },
-    ],
-  },
+  streak: { dailyFirst: 50, dailyStep: 50, dailyMax: 300, weeklyEveryDays: 7, weeklyPoints: 1000 },
   dailyBox: {
+    // 50 % · 30 % · 15 % · 4 % · 1 %. Las probabilidades no se publican.
     tiers: [
-      { id: "common", label: "Común", weight: 7500, kind: "points", pointsMin: 50, pointsMax: 100 },
-      { id: "rare", label: "Raro", weight: 2000, kind: "points", pointsMin: 200, pointsMax: 300 },
-      { id: "epic", label: "Épico", weight: 490, kind: "points", pointsMin: 1000, pointsMax: 1000 },
-      {
-        id: "legendary",
-        label: "Legendario",
-        weight: 10,
-        kind: "item",
-        name: "Tarjeta de 10 €",
-        monthlyStock: 3,
-        fallbackPoints: 1000,
-      },
+      { id: "p50", label: "50 puntos", weight: 5000, kind: "points", pointsMin: 50, pointsMax: 50 },
+      { id: "p100", label: "100 puntos", weight: 3000, kind: "points", pointsMin: 100, pointsMax: 100 },
+      { id: "p250", label: "250 puntos", weight: 1500, kind: "points", pointsMin: 250, pointsMax: 250 },
+      { id: "p500", label: "500 puntos", weight: 400, kind: "points", pointsMin: 500, pointsMax: 500 },
+      { id: "p2500", label: "2.500 puntos", weight: 100, kind: "points", pointsMin: 2500, pointsMax: 2500 },
     ],
   },
   rain: {
-    lluvia: { points: 300, windowMinutes: 10, maxPerStream: 3 },
-    maxwin: { points: 1000, windowMinutes: 10, maxPerStream: 2 },
+    lluvia: { points: 150, windowMinutes: 10, maxPerStream: 3 },
+    bigwin: { points: 300, windowMinutes: 10, maxPerStream: 2 },
+    maxwin: { points: 1000, windowMinutes: 10, maxPerStream: 1 },
   },
+  tiktok: { monthlyPrizes: [5000, 3000, 2000] },
   leaderboard: {
     // Bonus de puntos al empezar el mes siguiente. Sin multiplicador «% por
     // ver» (multiplierPct a 0) y sin premio del puesto 11 en adelante.
@@ -227,4 +204,16 @@ export function economyIssues(error: z.ZodError): EconomyIssue[] {
     path: issue.path.join("."),
     message: issueMessage(issue),
   }));
+}
+
+/** Puntos de racha que se cobran el día `day` de racha (1 = primer día). */
+export function streakDayPoints(streak: EconomySettings["streak"], day: number): number {
+  if (day < 1) return 0;
+  return Math.min(streak.dailyFirst + (day - 1) * streak.dailyStep, streak.dailyMax);
+}
+
+/** Extra que se cobra además el día `day` de racha (cada `weeklyEveryDays` días seguidos), o 0. */
+export function streakWeeklyBonus(streak: EconomySettings["streak"], day: number): number {
+  if (day < 1 || streak.weeklyEveryDays < 1) return 0;
+  return day % streak.weeklyEveryDays === 0 ? streak.weeklyPoints : 0;
 }

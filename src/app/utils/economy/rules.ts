@@ -4,9 +4,6 @@ import { getEconomySettings } from "./settings";
 export async function getPublicEconomyRules(): Promise<Record<string, unknown>> {
   const s = await getEconomySettings();
 
-  const dailyTotal = s.dailyBox.tiers.reduce((sum, t) => sum + t.weight, 0);
-  const streakTotal = s.streak.boxTiers.reduce((sum, t) => sum + t.weight, 0);
-
   return {
     pointsPerMinute: s.watch.pointsPerMinute,
     chatWindowMinutes: s.watch.chatWindowMinutes,
@@ -19,38 +16,23 @@ export async function getPublicEconomyRules(): Promise<Record<string, unknown>> 
     },
     streak: {
       minutesPerDay: s.minutes.streak,
-      bonusFromDay: s.streak.bonusFromDay,
-      bonusPct: s.streak.bonusPct,
-      boxEveryDays: s.streak.boxEveryDays,
+      dailyPoints: { first: s.streak.dailyFirst, step: s.streak.dailyStep, max: s.streak.dailyMax },
+      weekly: { everyDays: s.streak.weeklyEveryDays, points: s.streak.weeklyPoints },
       resetsMonthly: false,
-      boxTiers: s.streak.boxTiers.map((t) => ({
-        points: t.points,
-        probabilityPct: (t.weight / streakTotal) * 100,
-      })),
     },
+    // Solo cuándo se consigue: los premios y sus probabilidades no se publican.
     dailyBox: {
       minutesNeeded: s.minutes.dailyBox,
       perLiveDay: 1,
-      tiers: s.dailyBox.tiers.map((t) => ({
-        id: t.id,
-        label: t.label,
-        probabilityPct: (t.weight / dailyTotal) * 100,
-        ...(t.kind === "points"
-          ? { kind: "points", pointsMin: t.pointsMin, pointsMax: t.pointsMax }
-          : {
-              kind: "item",
-              name: t.name,
-              monthlyStock: t.monthlyStock,
-              fallbackPoints: t.fallbackPoints,
-            }),
-      })),
     },
     rain: {
       lluvia: { ...s.rain.lluvia },
+      bigwin: { ...s.rain.bigwin },
       maxwin: { ...s.rain.maxwin },
     },
     leaderboard: {
-      countsOnly: ["watch", "rain"],
+      countsOnly: ["watch"],
+      tieBreak: "streak",
       scale: s.leaderboard.scale.map((x) => ({ ...x })),
       bonusDoesNotStack: true,
     },

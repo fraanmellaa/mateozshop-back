@@ -25,8 +25,9 @@ type RainRpc = {
 };
 
 /**
- * Reparte una lluvia entre quienes han escrito en el chat dentro de la ventana
- * de la lluvia (una vez por usuario aunque esté en Kick y Twitch; sin baneados).
+ * Reparte un evento (lluvia, big win o max win) entre quienes escribieron en el
+ * chat dentro de la ventana ANTERIOR al comando (una vez por usuario aunque esté
+ * en Kick y Twitch; sin baneados). Escribir después del comando no cuenta.
  * Comprueba directo abierto y el máximo por directo. Todo ocurre en una
  * transacción SQL (economy_grant_rain).
  */

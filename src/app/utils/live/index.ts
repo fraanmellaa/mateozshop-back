@@ -13,9 +13,19 @@ const CLOSE_AFTER_MISSES = 2;
 // Si la plataforma lleva más de esto sin responder bien, se da el directo por
 // terminado (si no, una sesión abierta se quedaría así para siempre).
 const CLOSE_AFTER_ERROR_SECONDS = 15 * 60;
+// Si la plataforma falla, el directo se sigue dando por encendido (para pagar
+// puntos) solo durante este rato desde la última lectura buena en directo.
+const CONFIRMED_GRACE_SECONDS = 3 * 60;
 
 export type LiveState = {
+  /** Hay alguna sesión de directo abierta (puede seguir abierta por margen). */
   live: boolean;
+  /**
+   * El directo está realmente encendido ahora: alguna plataforma lo acaba de
+   * confirmar (o falló hace muy poco justo después de confirmarlo). Los puntos
+   * por minuto solo se pagan con esto a true.
+   */
+  confirmed: boolean;
   kick: boolean;
   twitch: boolean;
   sessions: { kick: number | null; twitch: number | null };
@@ -106,15 +116,20 @@ async function closeSession(id: number, now: number) {
   if (error) throw error;
 }
 
-/** Reconcilia una plataforma con su sesión abierta y devuelve el id de sesión vigente. */
-async function syncPlatform(platform: Platform, now: number): Promise<number | null> {
+type PlatformSync = { id: number | null; confirmed: boolean };
+
+/**
+ * Reconcilia una plataforma con su sesión abierta. Devuelve el id de la sesión
+ * vigente y si el directo está confirmado en esta lectura.
+ */
+async function syncPlatform(platform: Platform, now: number): Promise<PlatformSync> {
   const reading = await readPlatform(platform);
   const open = await getOpenSession(platform);
 
   if (!reading.configured) {
     // Sin credenciales no hay forma de saber nada: una sesión huérfana se cierra.
     if (open) await closeSession(open.id, now);
-    return null;
+    return { id: null, confirmed: false };
   }
 
   if (!reading.ok) {
@@ -123,19 +138,27 @@ async function syncPlatform(platform: Platform, now: number): Promise<number | n
     await updateState(platform, { last_error: reading.error.slice(0, 300), last_error_at: now });
     if (open && state.lastOkAt !== null && now - state.lastOkAt > CLOSE_AFTER_ERROR_SECONDS) {
       await closeSession(open.id, now);
-      return null;
+      return { id: null, confirmed: false };
     }
-    return open?.id ?? null;
+    // Fallo puntual justo después de una lectura buena en directo (sin lecturas
+    // negativas pendientes): se sigue pagando unos minutos, no más.
+    const recent =
+      open !== null &&
+      state.misses === 0 &&
+      state.lastOkAt !== null &&
+      now - state.lastOkAt <= CONFIRMED_GRACE_SECONDS;
+    return { id: open?.id ?? null, confirmed: recent };
   }
 
   if (reading.live) {
     await updateState(platform, { misses: 0, last_ok_at: now, last_error: null });
-    return open ? open.id : openSession(platform, now);
+    const id = open ? open.id : await openSession(platform, now);
+    return { id, confirmed: id !== null };
   }
 
   if (!open) {
     await updateState(platform, { misses: 0, last_ok_at: now, last_error: null });
-    return null;
+    return { id: null, confirmed: false };
   }
 
   const { misses } = await getState(platform);
@@ -143,10 +166,11 @@ async function syncPlatform(platform: Platform, now: number): Promise<number | n
   if (next >= CLOSE_AFTER_MISSES) {
     await closeSession(open.id, now);
     await updateState(platform, { misses: 0, last_ok_at: now, last_error: null });
-    return null;
+    return { id: null, confirmed: false };
   }
+  // La sesión sigue abierta por si es un falso negativo, pero ya no se paga.
   await updateState(platform, { misses: next, last_ok_at: now, last_error: null });
-  return open.id;
+  return { id: open.id, confirmed: false };
 }
 
 /**
@@ -160,8 +184,11 @@ export async function syncLiveState(): Promise<LiveState> {
   const now = Math.floor(Date.now() / 1000);
 
   const [kick, twitch] = await Promise.allSettled([syncPlatform("kick", now), syncPlatform("twitch", now)]);
-  const kickId = kick.status === "fulfilled" ? kick.value : null;
-  const twitchId = twitch.status === "fulfilled" ? twitch.value : null;
+  const kickId = kick.status === "fulfilled" ? kick.value.id : null;
+  const twitchId = twitch.status === "fulfilled" ? twitch.value.id : null;
+  const confirmed =
+    (kick.status === "fulfilled" && kick.value.confirmed) ||
+    (twitch.status === "fulfilled" && twitch.value.confirmed);
   if (kick.status === "rejected") console.error("syncLiveState kick failed:", kick.reason);
   if (twitch.status === "rejected") console.error("syncLiveState twitch failed:", twitch.reason);
 
@@ -173,6 +200,7 @@ export async function syncLiveState(): Promise<LiveState> {
 
   return {
     live: kickId !== null || twitchId !== null,
+    confirmed,
     kick: kickId !== null,
     twitch: twitchId !== null,
     sessions: { kick: kickId, twitch: twitchId },

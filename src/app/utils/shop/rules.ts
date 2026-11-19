@@ -1,3 +1,4 @@
+import { LAST_DAY_CUTOFF_HOUR } from "./schema";
 import { getShopSettings } from "./settings";
 
 /**
@@ -9,6 +10,13 @@ export async function getPublicShopRules(): Promise<Record<string, unknown>> {
 
   return {
     model: "Todos los premios se consiguen por pujas con puntos.",
+    // Economía final (migración 0039): cuántas pujas normales puede haber abiertas
+    // a la vez, que solo se abren con el directo encendido, el corte del último
+    // día del mes (hora de Andorra) y los puntos VIP de bienvenida al verificarse.
+    maxOpenAuctions: s.maxOpenAuctions,
+    opensOnlyLive: true,
+    lastDayCutoffHour: LAST_DAY_CUTOFF_HOUR,
+    vipWelcomePoints: s.vipWelcomePoints,
     bidding: {
       battleMinutes: s.battleMinutes,
       extendWindowMinutes: s.extendWindowMinutes,

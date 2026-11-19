@@ -195,7 +195,7 @@ export const performGiveawayLottery = async (giveawayId: number, options: { forc
           intro: `Enhorabuena, has sido seleccionado como ganador de "${giveaway.title}".`,
           details: [`Sorteo: ${giveaway.title}`, ...(code ? [`Código: ${code}`] : [])],
           ctaLabel: "Ver sorteo",
-          ctaUrl: `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://mateozshop.com"}/sorteos/${giveawayId}`,
+          ctaUrl: `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://mateoz.shop"}/sorteos/${giveawayId}`,
         });
       });
     }

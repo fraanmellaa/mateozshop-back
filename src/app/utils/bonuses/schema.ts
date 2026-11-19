@@ -68,6 +68,8 @@ export const bonusSchema = z.object({
   button_text: optionalText(40),
   featured: z.boolean(),
   conditions: optionalText(300),
+  /** Euros de primer depósito que pide este casino para verificarse. */
+  verify_min_deposit: z.number().int().min(1).max(10000),
   countries: countryList,
   blocked_countries: countryList,
   position: z.number().int().min(-100000).max(100000),
@@ -83,6 +85,7 @@ export const createBonusSchema = bonusSchema.partial({
   button_text: true,
   featured: true,
   conditions: true,
+  verify_min_deposit: true,
   countries: true,
   blocked_countries: true,
   position: true,

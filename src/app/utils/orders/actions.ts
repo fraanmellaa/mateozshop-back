@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/app/utils/auth";
 import { refundPoints } from "@/app/utils/points";
 import { getOrderCurrency, refundVip } from "@/app/utils/points/vip";
+import { isHoldVoided } from "@/app/utils/shop/bids";
 import { sendCustomEmail, sendEmail } from "../email";
 import { passOrderToNextCore, reviewOrderCore } from "./review";
 
@@ -54,7 +55,7 @@ export async function updateOrderStatus(orderId: number, status: number) {
 
     const { data: rows, error: readError } = await supabase
       .from("orders")
-      .select("id, status, user_id, product_id, total, delivered_code, needs_review, reviewed_at")
+      .select("id, status, user_id, product_id, total, delivered_code, needs_review, reviewed_at, created_at")
       .eq("id", orderId)
       .limit(1);
     if (readError) throw readError;
@@ -80,9 +81,11 @@ export async function updateOrderStatus(orderId: number, status: number) {
     if (status === CANCELLED) {
       // La devolución va primero y lleva clave de idempotencia: si algo falla
       // después, repetir la cancelación no devuelve los puntos dos veces.
-      if (order.total > 0) {
-        // Un premio pujado con puntos VIP se devuelve en puntos VIP.
-        const refund = (await getOrderCurrency(order.id)) === "vip" ? refundVip : refundPoints;
+      // Un premio pujado con puntos VIP se devuelve en puntos VIP. Si el pedido es
+      // de antes de un reinicio de saldos, esos puntos ya no existen: no se devuelven.
+      const currency = await getOrderCurrency(order.id);
+      if (order.total > 0 && !(await isHoldVoided(order.created_at, currency))) {
+        const refund = currency === "vip" ? refundVip : refundPoints;
         await refund(order.user_id, order.total, {
           kind: "order_refund",
           refType: "order",
@@ -237,7 +240,7 @@ export async function reviewOrder(orderId: number, approve: boolean, note: strin
   }
 }
 
-/** Premio VIP sin verificación comprobada: pasa a la siguiente puja más alta. */
+/** Premio VIP sin verificación comprobada: se vuelve a poner en puja (sin devolver los puntos). */
 export async function passOrderToNext(orderId: number, note: string) {
   const admin = await requireAdmin();
   if (!admin) return UNAUTHORIZED;

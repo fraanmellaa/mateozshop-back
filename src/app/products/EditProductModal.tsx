@@ -16,7 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { PRODUCT_CATEGORIES } from "@/app/utils/products/categories";
 import { PRODUCT_CURRENCIES } from "@/app/utils/products/currency";
 import type { ProductRow } from "@/app/utils/products";
-import { toDateTimeLocal } from "@/app/utils/datetime";
+import { fromDateTimeLocal, toDateTimeLocal } from "@/app/utils/datetime";
 
 const EMPTY_FORM = {
   name: "",
@@ -29,6 +29,9 @@ const EMPTY_FORM = {
   requires_trade_link: false,
   category: "",
   currency: "points",
+  // «Disponible desde» como fecha y hora local ("" = sin fecha).
+  available_from: "",
+  counts_for_cap: true,
   codesText: "",
 };
 
@@ -44,6 +47,8 @@ function toForm(product: ProductRow): typeof EMPTY_FORM {
     requires_trade_link: product.requires_trade_link,
     category: product.category ?? "",
     currency: product.currency ?? "points",
+    available_from: product.available_from ? toDateTimeLocal(product.available_from) : "",
+    counts_for_cap: product.counts_for_cap !== false,
     codesText: (product.codes || []).join("\n"),
   };
 }
@@ -95,6 +100,9 @@ export default function EditProductModal({
       changes.requires_trade_link = formData.requires_trade_link;
     if (formData.category !== initial.category) changes.category = formData.category;
     if (formData.currency !== initial.currency) changes.currency = formData.currency;
+    if (formData.available_from !== initial.available_from)
+      changes.available_from = formData.available_from ? fromDateTimeLocal(formData.available_from) : null;
+    if (formData.counts_for_cap !== initial.counts_for_cap) changes.counts_for_cap = formData.counts_for_cap;
     if (formData.delivery_type === "code" && formData.codesText !== initial.codesText) {
       changes.codes = formData.codesText
         .split("\n")
@@ -184,7 +192,7 @@ export default function EditProductModal({
           </div>
 
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">Puja mínima (pts)</Label>
+            <Label className="text-right">Precio de salida (pts)</Label>
             <Input
               type="number"
               min={1}
@@ -254,8 +262,36 @@ export default function EditProductModal({
                 ))}
               </select>
               <p className="mt-1 text-xs text-muted-foreground">
-                Con puntos VIP solo pujan los usuarios verificados, el premio sale en «Verificados» y la puja mínima es siempre 1 punto VIP.
+                Con puntos VIP solo pujan los usuarios verificados y el premio sale en «Verificados». El precio de salida es el de arriba, en puntos VIP.
               </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right">Disponible desde</Label>
+            <div className="col-span-3">
+              <Input
+                type="datetime-local"
+                value={formData.available_from}
+                onChange={(e) => setFormData({ ...formData, available_from: e.target.value })}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {formData.currency === "vip"
+                  ? "Fecha de apertura de este premio VIP: se puede pujar en el primer directo que haya desde esa fecha. Sin fecha, está cerrado."
+                  : "Antes de esa fecha el premio se ve en la tienda con «Se abre el…» y no se puede pujar. Vacío = disponible ya."}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right">Tope mensual</Label>
+            <div className="col-span-3 flex items-center gap-2">
+              <Checkbox
+                checked={!formData.counts_for_cap}
+                disabled={formData.currency === "vip"}
+                onCheckedChange={(v) => setFormData({ ...formData, counts_for_cap: !v })}
+              />
+              <span className="text-sm">No cuenta para el tope de premios al mes</span>
             </div>
           </div>
 

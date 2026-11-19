@@ -81,7 +81,7 @@ export async function PUT(
     // se rechace y se vuelva a aprobar.
     if (status === "approved" && (await claimTikTokWinnerNotification(resultId))) {
       const leaderboardTitle = previous.leaderboard?.title || "tu leaderboard de TikTok";
-      const targetUrl = `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://mateozshop.com"}/tiktok/leaderboards/${previous.leaderboard_id}`;
+      const targetUrl = `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://mateoz.shop"}/tiktok/leaderboards/${previous.leaderboard_id}`;
 
       try {
         if (previous.user?.discord_id) {

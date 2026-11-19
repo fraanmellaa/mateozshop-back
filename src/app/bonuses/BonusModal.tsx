@@ -74,6 +74,7 @@ function BonusModalInner({
     color: bonus?.color ?? "",
     button_text: bonus?.button_text ?? "",
     conditions: bonus?.conditions ?? "",
+    verify_min_deposit: String(bonus?.verify_min_deposit ?? 30),
     featured: bonus?.featured ?? false,
     countries: (bonus?.countries ?? []).join(", "),
     blocked_countries: (bonus?.blocked_countries ?? []).join(", "),
@@ -144,6 +145,7 @@ function BonusModalInner({
             color: form.color,
             button_text: form.button_text,
             conditions: form.conditions,
+            verify_min_deposit: Math.max(1, parseInt(form.verify_min_deposit) || 30),
             featured: form.featured,
             countries: allowed.codes,
             blocked_countries: blocked.codes,
@@ -335,6 +337,22 @@ function BonusModalInner({
             />
             <p className="text-xs text-muted-foreground">
               Texto corto que se muestra al lado de la oferta.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="verify_min_deposit">Depósito mínimo para verificar (€)</Label>
+            <Input
+              id="verify_min_deposit"
+              type="number"
+              min={1}
+              max={10000}
+              step={1}
+              value={form.verify_min_deposit}
+              onChange={(e) => setForm({ ...form, verify_min_deposit: e.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">
+              Primer depósito que pide este casino para verificar la cuenta. La web y el panel de
+              Verificaciones leen esta cifra.
             </p>
           </div>
           <div className="space-y-2">
