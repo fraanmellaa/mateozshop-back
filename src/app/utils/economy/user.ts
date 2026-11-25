@@ -119,19 +119,20 @@ export async function getUserEconomy(userId: number): Promise<UserEconomy> {
   const live = open.size > 0;
   const liveDay = liveDayRaw ?? null;
 
-  const prevLiveDay = liveDay
-    ? await rpc<string | null>("economy_prev_live_day", { p_day: liveDay })
-    : null;
-
+  // Las tres consultas dependen solo del día de directo: van a la vez (antes
+  // el día anterior se pedía primero y las otras dos esperaban).
+  let prevLiveDay: string | null = null;
   let minutesToday = 0;
   let claimedToday = false;
   if (liveDay) {
-    const [watchRes, claimRes] = await Promise.all([
+    const [prev, watchRes, claimRes] = await Promise.all([
+      rpc<string | null>("economy_prev_live_day", { p_day: liveDay }),
       supabase.from("user_watch_days").select("minutes").eq("user_id", userId).eq("day", liveDay).limit(1),
       supabase.from("daily_box_claims").select("id").eq("user_id", userId).eq("day", liveDay).limit(1),
     ]);
     unwrap(watchRes.error, "watch day");
     unwrap(claimRes.error, "claim");
+    prevLiveDay = prev;
     minutesToday = watchRes.data?.[0]?.minutes ?? 0;
     claimedToday = (claimRes.data?.length ?? 0) > 0;
   }

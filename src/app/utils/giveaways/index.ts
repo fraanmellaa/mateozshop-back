@@ -129,7 +129,11 @@ export const getGiveaways = async () => {
   const giveawaysData = await Promise.all(
     ((giveawaysList || []) as unknown as (PublicRow & { id: number; start_at: number; end_at: number; winner: number | null })[]).map(
       async (giveaway) => {
-        const entries = await getGiveawayEntries(giveaway.id);
+        // Entradas y ganador a la vez (antes, una consulta detrás de otra).
+        const [entries, winners] = await Promise.all([
+          getGiveawayEntries(giveaway.id),
+          getGiveawayWinners(giveaway),
+        ]);
         return {
           ...stripSecrets(giveaway),
           ...publicDrawFields(giveaway),
@@ -137,7 +141,7 @@ export const getGiveaways = async () => {
           rules: undefined,
           entries,
           entries_count: entries.reduce((sum, e) => sum + e.tickets, 0),
-          winners: await getGiveawayWinners(giveaway),
+          winners,
         };
       }
     )
@@ -163,12 +167,18 @@ export const getGiveawayById = async (id: number) => {
     | undefined;
   if (!giveaway) return null;
 
+  // Las tres lecturas no dependen entre sí: van a la vez.
+  const [entriesCount, entries, winners] = await Promise.all([
+    countEntries(giveaway.id),
+    getGiveawayEntries(giveaway.id),
+    getGiveawayWinners(giveaway),
+  ]);
   return {
     ...stripSecrets(giveaway),
     ...publicDrawFields(giveaway),
-    entries_count: await countEntries(giveaway.id),
-    entries: await getGiveawayEntries(giveaway.id),
-    winners: await getGiveawayWinners(giveaway),
+    entries_count: entriesCount,
+    entries,
+    winners,
   };
 };
 
