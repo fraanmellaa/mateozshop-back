@@ -5,6 +5,7 @@ import { accountErrorResponse } from "@/app/utils/accounts";
 import { MAX_TICKETS_PER_PURCHASE, buyGiveawayTickets } from "@/app/utils/giveaways/tickets";
 import { gateErrorResponse } from "@/app/utils/lootBoxes/gates";
 import { pointsErrorResponse } from "@/app/utils/products/pointsErrors";
+import { RATE_RULES, rateLimit, tooManyRequests } from "@/app/utils/rateLimit";
 import { getUserByDiscordId } from "@/app/utils/users";
 import { isResetBlocking } from "@/app/utils/economy/monthly";
 
@@ -27,6 +28,10 @@ export async function POST(
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ success: false, error: "INVALID_REQUEST_BODY" }, { status: 400 });
+  }
+
+  if (!(await rateLimit(`tickets:${parsed.data.discord_id}`, RATE_RULES.tickets))) {
+    return tooManyRequests(RATE_RULES.tickets);
   }
 
   try {

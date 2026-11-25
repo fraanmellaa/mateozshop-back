@@ -5,6 +5,7 @@ import { assertAdult } from "@/app/utils/accounts/adult";
 import { findEconomyUser } from "@/app/utils/economy/db";
 import { extensionError, requireExtensionUser } from "@/app/utils/extensionAuth";
 import { extensionOk } from "@/app/utils/games/http";
+import { RATE_RULES, rateLimit } from "@/app/utils/rateLimit";
 import {
   getCurrentStreamPrediction,
   StreamPredictionError,
@@ -17,6 +18,9 @@ import { voteStreamPredictionSchema } from "@/app/utils/streamPredictions/schema
 export async function POST(request: NextRequest) {
   const auth = await requireExtensionUser(request);
   if (!auth.ok) return auth.response;
+  if (!(await rateLimit(`prediction:${auth.user.id}`, RATE_RULES.prediction))) {
+    return extensionError("RATE_LIMITED", 429);
+  }
 
   const parsed = voteStreamPredictionSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return extensionError("INVALID_REQUEST_BODY", 400);

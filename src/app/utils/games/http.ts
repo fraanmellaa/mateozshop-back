@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { accountErrorResponse } from "@/app/utils/accounts";
 import { requireExtensionUser } from "@/app/utils/extensionAuth";
+import { RATE_RULES, memoryRateLimit } from "@/app/utils/rateLimit";
 import { getUserByDiscordId } from "@/app/utils/users";
 
 import { GameError } from "./errors";
@@ -64,6 +65,12 @@ export async function gameRoute<B = undefined>(
       const user = await getUserByDiscordId(discordId);
       if (!user) throw new GameError("USER_NOT_FOUND", 404);
       userId = user.id;
+    }
+
+    // Tope por usuario para las jugadas (no para los sondeos de estado): solo
+    // frena a un script; una persona no llega ni de lejos.
+    if (options.schema && !memoryRateLimit(`game:${userId}`, RATE_RULES.game)) {
+      throw new GameError("RATE_LIMITED", 429);
     }
 
     let body = undefined as B;

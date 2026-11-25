@@ -5,6 +5,7 @@ import { extensionError, signExtensionToken } from "@/app/utils/extensionAuth";
 import { extensionOk } from "@/app/utils/games/http";
 import { createUser, getUserByDiscordId } from "@/app/utils/users";
 import { requireEnv } from "@/lib/env";
+import { RATE_RULES, directIp, rateLimit } from "@/app/utils/rateLimit";
 
 const bodySchema = z.object({
   code: z.string().min(1).max(512),
@@ -101,6 +102,11 @@ async function upsertUserFromDiscord(me: DiscordUser) {
 }
 
 export async function POST(request: NextRequest) {
+  // Ruta pública que llama a Discord con nuestro secreto: tope por IP.
+  if (!(await rateLimit(`ext-login:${directIp(request.headers)}`, RATE_RULES.extensionLogin))) {
+    return extensionError("RATE_LIMITED", 429);
+  }
+
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return extensionError("INVALID_REQUEST_BODY", 400);
 

@@ -2,10 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { SignJWT } from "jose";
 
 import { ADMIN_COOKIE } from "@/app/utils/auth";
+import { RATE_RULES, directIp, rateLimit } from "@/app/utils/rateLimit";
 import { requireEnv, safeEqual } from "@/lib/env";
 
 export async function POST(request: NextRequest) {
   try {
+    // Tope de intentos por IP: sin esto se podía probar contraseñas sin fin.
+    const rule = RATE_RULES.adminLogin;
+    if (!(await rateLimit(`admin-login:${directIp(request.headers)}`, rule))) {
+      return NextResponse.json(
+        { error: "Demasiados intentos. Espera unos minutos y vuelve a probar." },
+        { status: 429, headers: { "Retry-After": String(rule.windowSeconds) } }
+      );
+    }
+
     const body = await request.json().catch(() => null);
     const username = typeof body?.username === "string" ? body.username : "";
     const password = typeof body?.password === "string" ? body.password : "";

@@ -11,12 +11,16 @@ import { classicBetSchema } from "@/app/utils/classicPredictions/schema";
 import { findEconomyUser } from "@/app/utils/economy/db";
 import { extensionError, requireExtensionUser } from "@/app/utils/extensionAuth";
 import { extensionOk } from "@/app/utils/games/http";
+import { RATE_RULES, rateLimit } from "@/app/utils/rateLimit";
 
 // Pone puntos a una opción de una predicción (Classic). Se descuentan al
 // momento. Mismas comprobaciones que los juegos: sin baneo y con el +18.
 export async function POST(request: NextRequest) {
   const auth = await requireExtensionUser(request);
   if (!auth.ok) return auth.response;
+  if (!(await rateLimit(`prediction:${auth.user.id}`, RATE_RULES.prediction))) {
+    return extensionError("RATE_LIMITED", 429);
+  }
 
   const parsed = classicBetSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return extensionError("INVALID_REQUEST_BODY", 400);

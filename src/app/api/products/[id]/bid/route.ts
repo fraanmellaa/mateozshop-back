@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { placeBidWhenLive, shopBidErrorResponse } from "@/app/utils/shop/bids";
 import { publishBidUpdated, publishUserNotification } from "@/app/utils/realtime";
+import { RATE_RULES, rateLimit, tooManyRequests } from "@/app/utils/rateLimit";
 import { getUserByDiscordId } from "@/app/utils/users";
 import { isResetBlocking } from "@/app/utils/economy/monthly";
 import { clientIpFromHeaders, recordUserIp } from "@/app/utils/orders/duplicates";
@@ -31,6 +32,8 @@ export async function POST(
     );
   }
   const body = parsed.data;
+
+  if (!(await rateLimit(`bid:${body.discord_id}`, RATE_RULES.bid))) return tooManyRequests(RATE_RULES.bid);
 
   try {
     // Durante el reinicio mensual no se puja ni se compra: lo gastado ahora se

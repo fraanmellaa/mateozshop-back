@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { RATE_RULES, rateLimit, tooManyRequests } from "@/app/utils/rateLimit";
 import { getUserByDiscordId } from "@/app/utils/users";
 import {
   PROOF_MAX_BYTES,
@@ -16,6 +17,10 @@ import { fail, failure } from "../shared";
 // solicitud. Van de una en una porque las dos juntas no caben en una petición.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: discordId } = await params;
+  // Cada captura son varias conversiones de imagen: tope por usuario, antes de leer el archivo.
+  if (!(await rateLimit(`proof:${discordId}`, RATE_RULES.proofUpload))) {
+    return tooManyRequests(RATE_RULES.proofUpload);
+  }
   const form = await request.formData().catch(() => null);
   if (!form) return fail("INVALID_REQUEST", 400);
 
