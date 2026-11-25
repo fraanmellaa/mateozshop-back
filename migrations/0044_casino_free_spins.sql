@@ -13,8 +13,9 @@
 -- La web lee de aquí lo que enseña la tarjeta:
 --   · nombre            → nombre de la slot
 --   · descripción, 1.ª línea  → «Casino Barcelona · 30 tiradas» (de ese «30»
---                               sale la etiqueta «30 FS»)
---   · descripción, resto      → condiciones, en la ventana de puja
+--                               sale la etiqueta «30 tiradas»)
+--   · descripción, resto      → condiciones: «Ver condiciones» de la tarjeta y
+--                               aviso de la ventana de puja
 --   · imagen            → ruta dentro de la web pública (public/slots/)
 
 SET search_path TO public;
@@ -33,7 +34,7 @@ INSERT INTO products (
 SELECT
   v.name,
   'Casino Barcelona · 30 tiradas' || E'\n' ||
-    'Para canjearlas necesitas cuenta verificada en Casino Barcelona y un depósito en los últimos 30 días.',
+    'Para usarlas necesitas una cuenta verificada en Casino Barcelona y un depósito en los últimos 30 días. 30 tiradas a la apuesta mínima de la slot. Caducan el 28/02/2027.',
   v.image,
   3000,
   -- Lo que le quede al grupo este mes (100 la primera vez).
