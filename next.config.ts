@@ -7,6 +7,22 @@ const nextConfig: NextConfig = {
     // queda detrás de la sesión de admin en src/proxy.ts.
     remotePatterns: [{ protocol: "https", hostname: "**", pathname: "/**" }],
   },
+  poweredByHeader: false,
+  // Cabeceras de seguridad del panel y de la API: nadie puede meter el panel en
+  // un marco de otra web, y el navegador no adivina tipos de archivo.
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
