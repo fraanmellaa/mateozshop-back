@@ -36,6 +36,8 @@ export default function OrderDetail({ order }: OrderDetailProps) {
   const [currentOrder, setCurrentOrder] = useState(order);
 
   // Tras router.refresh() llega el pedido actualizado desde el servidor.
+  // Patrón habitual (copiar al estado lo que llega de fuera o de una carga): no provoca renders en cadena aquí.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setCurrentOrder(order), [order]);
   const [isResendingCode, setIsResendingCode] = useState(false);
   const [review, setReview] = useState<{ approve: boolean; next?: boolean } | null>(null);

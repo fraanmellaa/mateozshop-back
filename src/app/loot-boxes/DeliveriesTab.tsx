@@ -59,6 +59,8 @@ export default function DeliveriesTab() {
   }, [filter, page]);
 
   useEffect(() => {
+    // Patrón habitual (copiar al estado lo que llega de fuera o de una carga): no provoca renders en cadena aquí.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 

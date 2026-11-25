@@ -48,6 +48,8 @@ export default function EditGiveawayModal({
       const [startDate, startTime] = toDateTimeLocal(giveaway.start_at).split("T");
       const [endDate, endTime] = toDateTimeLocal(giveaway.end_at).split("T");
 
+      // Patrón habitual (copiar al estado lo que llega de fuera o de una carga): no provoca renders en cadena aquí.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFormData({
         title: giveaway.title,
         image: giveaway.image,
