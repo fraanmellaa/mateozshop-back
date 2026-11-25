@@ -16,6 +16,19 @@ const SELF_AUTH_API_PREFIXES = [
   "/api/webhooks/",
 ];
 
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/** true si la petición no trae `Origin` o es el del propio panel. */
+function sameOrigin(request: NextRequest): boolean {
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === (request.headers.get("host") ?? request.nextUrl.host);
+  } catch {
+    return false;
+  }
+}
+
 function unauthorized() {
   return NextResponse.json(
     { success: false, error: "UNAUTHORIZED" },
@@ -35,6 +48,13 @@ export async function proxy(request: NextRequest) {
     }
 
     if (pathname.startsWith("/api/admin/")) {
+      // CSRF: lo que cambia algo en el panel tiene que salir del propio panel.
+      // El navegador manda `Origin` en todo POST/PUT/DELETE; si viene de otra
+      // web (aunque sea del mismo dominio), se rechaza. Sin `Origin` (scripts,
+      // herramientas) sigue haciendo falta la sesión de admin.
+      if (!SAFE_METHODS.has(request.method) && !sameOrigin(request)) {
+        return NextResponse.json({ success: false, error: "FORBIDDEN_ORIGIN" }, { status: 403 });
+      }
       const admin = await verifyAdminToken(request.cookies.get(ADMIN_COOKIE)?.value);
       return admin ? NextResponse.next() : unauthorized();
     }
