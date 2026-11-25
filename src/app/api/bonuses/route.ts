@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getActiveBonuses, HIDDEN_COUNTRIES } from "@/app/utils/bonuses";
+import { getActiveBonuses } from "@/app/utils/bonuses";
 
 export async function GET(request: NextRequest) {
   const country = request.nextUrl.searchParams.get("country");
@@ -9,10 +9,6 @@ export async function GET(request: NextRequest) {
       { success: false, error: "INVALID_COUNTRY" },
       { status: 400 }
     );
-  }
-
-  if (country !== null && HIDDEN_COUNTRIES.includes(country)) {
-    return NextResponse.json({ success: true, result: [] }, { status: 200 });
   }
 
   try {

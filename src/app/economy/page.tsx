@@ -6,10 +6,12 @@ import { getEconomySettings } from "../utils/economy/settings";
 import { adMonth } from "../utils/economy/time";
 
 import PageBody from "./PageBody";
+import { requireAdminPage } from "@/app/utils/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function EconomyPage() {
+  await requireAdminPage();
   const month = adMonth();
   const [settings, lastReset, board] = await Promise.all([
     getEconomySettings(),

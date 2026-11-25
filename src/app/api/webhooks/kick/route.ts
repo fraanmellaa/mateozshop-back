@@ -65,6 +65,12 @@ export async function POST(request: NextRequest) {
     if (type !== "chat.message.sent") return ok();
 
     const event = JSON.parse(rawBody) as KickChatEvent;
+    // Kick firma con la misma clave los avisos de todas las apps: cualquiera
+    // puede apuntar la suya aquí con el chat de su propio canal. Solo cuenta
+    // el chat del canal configurado; el resto se descarta.
+    const ownChannel = process.env.KICK_BROADCASTER_USER_ID?.trim();
+    if (!ownChannel || String(event.broadcaster?.user_id ?? "") !== ownChannel) return ok();
+
     const senderId = event.sender?.user_id;
     if (senderId == null || typeof event.content !== "string") return ok();
 

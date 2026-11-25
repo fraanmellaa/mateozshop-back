@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 
@@ -43,6 +44,17 @@ export async function getAdminUser(): Promise<AdminUser | null> {
  * ya filtra, pero cada punto de entrada vuelve a comprobar la sesión.
  */
 export const requireAdmin = getAdminUser;
+
+/**
+ * Para las páginas del panel: sin sesión de admin, a /login. El proxy ya lo
+ * filtra, pero cada página lo comprueba otra vez antes de leer nada, para que
+ * un fallo del proxy no deje ver datos.
+ */
+export async function requireAdminPage(): Promise<AdminUser> {
+  const admin = await getAdminUser();
+  if (!admin) redirect("/login");
+  return admin;
+}
 
 export function adminUnauthorized() {
   return NextResponse.json(

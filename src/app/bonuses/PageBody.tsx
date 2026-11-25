@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, Edit, Plus, Power, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Edit, GripVertical, Plus, Power, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -13,14 +13,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { Bonus } from "../utils/bonuses";
-import { HIDDEN_COUNTRIES } from "../utils/bonuses/countries";
+import { COUNTRY_GROUPS, countriesText } from "../utils/bonuses/countries";
 import BonusModal from "./BonusModal";
 
 function countriesLabel(bonus: Bonus) {
   const base = bonus.countries.filter(
     (c) => !bonus.blocked_countries.includes(c)
   );
-  return base.join(", ") || "Ninguno (no se muestra)";
+  return countriesText(base) || "Ninguno (no se muestra)";
 }
 
 async function send(url: string, method: string, body?: unknown) {
@@ -41,16 +41,19 @@ export default function PageBody({ bonuses }: { bonuses: Bonus[] }) {
   const [selected, setSelected] = useState<Bonus | null>(null);
   const [busy, setBusy] = useState(false);
   const [countryFilter, setCountryFilter] = useState("");
+  // Orden mientras se arrastra una fila (null = el que viene de la BD).
+  const [dragOrder, setDragOrder] = useState<Bonus[] | null>(null);
+  const [dragId, setDragId] = useState<number | null>(null);
 
-  const filter = countryFilter.trim().toUpperCase();
-  const visibleRows = filter
-    ? bonuses.filter(
-        (b) =>
-          !HIDDEN_COUNTRIES.includes(filter) &&
-          !b.blocked_countries.includes(filter) &&
-          b.countries.includes(filter)
+  // El filtro es una zona del panel (España, Andorra...): salen los casinos
+  // que se ven en alguno de sus países.
+  const filterCodes = COUNTRY_GROUPS.find((group) => group.label === countryFilter)?.codes ?? [];
+  const list = dragOrder ?? bonuses;
+  const visibleRows = filterCodes.length
+    ? list.filter((b) =>
+        filterCodes.some((code) => b.countries.includes(code) && !b.blocked_countries.includes(code))
       )
-    : bonuses;
+    : list;
 
   const run = async (action: () => Promise<void>, errorMessage: string) => {
     setBusy(true);
@@ -90,22 +93,39 @@ export default function PageBody({ bonuses }: { bonuses: Bonus[] }) {
     );
   };
 
-  // Reasigna el orden 1..n según la nueva posición en la lista.
+  // Guarda el orden 1..n de la lista entera de una vez.
+  const saveOrder = (reordered: Bonus[]) =>
+    run(async () => {
+      await send("/api/admin/bonuses/order", "PUT", { ids: reordered.map((b) => b.id) });
+    }, "Error al reordenar");
+
   const move = (index: number, delta: -1 | 1) => {
     const target = index + delta;
     if (target < 0 || target >= bonuses.length) return;
     const reordered = [...bonuses];
     [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    return saveOrder(reordered);
+  };
 
-    return run(async () => {
-      for (let i = 0; i < reordered.length; i++) {
-        if (reordered[i].position !== i + 1) {
-          await send(`/api/admin/bonuses/${reordered[i].id}`, "PUT", {
-            position: i + 1,
-          });
-        }
-      }
-    }, "Error al reordenar");
+  // Arrastrar y soltar: la fila se mueve en vivo y el orden se guarda al soltar.
+  const dragOver = (overId: number) => {
+    if (dragId === null || dragId === overId) return;
+    const current = dragOrder ?? bonuses;
+    const from = current.findIndex((b) => b.id === dragId);
+    const to = current.findIndex((b) => b.id === overId);
+    if (from < 0 || to < 0) return;
+    const reordered = [...current];
+    const [item] = reordered.splice(from, 1);
+    reordered.splice(to, 0, item);
+    setDragOrder(reordered);
+  };
+  const dragEnd = async () => {
+    const reordered = dragOrder;
+    setDragId(null);
+    if (reordered && reordered.some((b, i) => b.id !== bonuses[i]?.id)) {
+      await saveOrder(reordered);
+    }
+    setDragOrder(null);
   };
 
   const nextPosition =
@@ -114,17 +134,23 @@ export default function PageBody({ bonuses }: { bonuses: Bonus[] }) {
   return (
     <div className="w-full">
       <div className="flex items-center justify-between py-4">
-        <p className="text-sm text-muted-foreground">
-          {bonuses.length} casinos. Solo los activos se muestran en la web, y
-          solo en los países con licencia. Andorra (AD) queda siempre oculto.
+        <p className="max-w-xl text-sm text-muted-foreground">
+          {bonuses.length} casinos. Arrastra las filas para cambiar el orden de la web
+          (los 3 primeros, o los destacados, van arriba). Cada casino sale solo en sus países.
         </p>
-        <input
+        <select
           value={countryFilter}
           onChange={(e) => setCountryFilter(e.target.value)}
-          maxLength={2}
-          placeholder="Filtrar país (ES)"
-          className="h-9 w-40 rounded-md border bg-transparent px-3 text-sm"
-        />
+          className="h-9 w-44 rounded-md border bg-transparent px-3 text-sm"
+          aria-label="Ver casinos de una zona"
+        >
+          <option value="">Todas las zonas</option>
+          {COUNTRY_GROUPS.map((group) => (
+            <option key={group.label} value={group.label}>
+              {group.label}
+            </option>
+          ))}
+        </select>
         <Button
           onClick={() => {
             setSelected(null);
@@ -140,11 +166,12 @@ export default function PageBody({ bonuses }: { bonuses: Bonus[] }) {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8" />
               <TableHead>Logo</TableHead>
               <TableHead>Casino</TableHead>
               <TableHead>Color</TableHead>
               <TableHead>Bono</TableHead>
-              <TableHead>Países con licencia</TableHead>
+              <TableHead>Se muestra en</TableHead>
               <TableHead>Activo</TableHead>
               <TableHead>Orden</TableHead>
               <TableHead>Enlace</TableHead>
@@ -156,7 +183,27 @@ export default function PageBody({ bonuses }: { bonuses: Bonus[] }) {
               visibleRows.map((bonus) => {
                 const index = bonuses.indexOf(bonus);
                 return (
-                <TableRow key={bonus.id}>
+                <TableRow
+                  key={bonus.id}
+                  draggable={!busy && !filterCodes.length}
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    setDragId(bonus.id);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    dragOver(bonus.id);
+                  }}
+                  onDrop={(e) => e.preventDefault()}
+                  onDragEnd={dragEnd}
+                  className={dragId === bonus.id ? "opacity-40" : undefined}
+                >
+                  <TableCell className="w-8 pr-0">
+                    <GripVertical
+                      className={`h-4 w-4 text-muted-foreground ${filterCodes.length ? "opacity-30" : "cursor-grab"}`}
+                      aria-label="Arrastrar para ordenar"
+                    />
+                  </TableCell>
                   <TableCell>
                     {bonus.image ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -207,7 +254,7 @@ export default function PageBody({ bonuses }: { bonuses: Bonus[] }) {
                       {bonus.is_active ? "Activo" : "Oculto"}
                     </span>
                   </TableCell>
-                  <TableCell>{bonus.position}</TableCell>
+                  <TableCell>{index + 1}</TableCell>
                   <TableCell>
                     {bonus.url ? (
                       <a
@@ -281,7 +328,7 @@ export default function PageBody({ bonuses }: { bonuses: Bonus[] }) {
               })
             ) : (
               <TableRow>
-                <TableCell colSpan={9} className="h-24 text-center">
+                <TableCell colSpan={10} className="h-24 text-center">
                   No hay bonos todavía.
                 </TableCell>
               </TableRow>

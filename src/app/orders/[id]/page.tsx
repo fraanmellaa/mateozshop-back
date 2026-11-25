@@ -2,12 +2,14 @@ import { getOrderById } from "@/app/utils/orders";
 import { SiteHeader } from "@/app/components/Header";
 import { notFound } from "next/navigation";
 import OrderDetail from "./OrderDetail";
+import { requireAdminPage } from "@/app/utils/auth";
 
 export default async function OrderDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireAdminPage();
   const resolvedParams = await params;
   const id = resolvedParams.id;
 

@@ -1,3 +1,4 @@
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { NextRequest, NextResponse } from "next/server";
 import { adminUnauthorized, requireAdmin } from "@/app/utils/auth";
 import { updateGiveaway, deleteGiveaway } from "@/app/utils/giveaways/admin";
@@ -54,7 +55,21 @@ export async function PUT(
           { status: 400 }
         );
       }
-      updateData.cost = parseInt(cost);
+      const newCost = parseInt(cost);
+      // Con tickets ya vendidos el coste no se toca: al borrar un sorteo se
+      // devuelve «tickets × coste», así que cambiarlo devolvería de más o de menos.
+      const supabase = getSupabaseAdmin();
+      const [{ data: current }, { count: sold }] = await Promise.all([
+        supabase.from("giveaways").select("cost").eq("id", id).maybeSingle(),
+        supabase.from("giveaways_entries").select("id", { count: "exact", head: true }).eq("giveaway_id", id),
+      ]);
+      if (current && current.cost !== newCost && (sold ?? 0) > 0) {
+        return NextResponse.json(
+          { error: "No se puede cambiar el coste del ticket: ya hay tickets vendidos" },
+          { status: 409 }
+        );
+      }
+      updateData.cost = newCost;
     }
     if (start_at) updateData.start_at = parseInt(start_at);
     if (end_at) updateData.end_at = parseInt(end_at);

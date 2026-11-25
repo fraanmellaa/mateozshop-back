@@ -3,12 +3,14 @@ import { Suspense } from "react";
 import { SiteHeader } from "../components/Header";
 import { STATS_MIGRATION_ERROR, getAdminStats, type AdminStats } from "../utils/stats";
 import PageBody from "./PageBody";
+import { requireAdminPage } from "@/app/utils/auth";
 
 export const dynamic = "force-dynamic";
 
 // Números de la economía: una fila por semana y otra por mes con los puntos
 // repartidos y gastados y los premios puestos y vendidos.
 export default async function StatsPage() {
+  await requireAdminPage();
   let weeks: AdminStats | null = null;
   let months: AdminStats | null = null;
   let error: string | null = null;

@@ -1,8 +1,8 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
-import { DEFAULT_COUNTRY, HIDDEN_COUNTRIES } from "./countries";
+import { DEFAULT_COUNTRY } from "./countries";
 
-export { DEFAULT_COUNTRY, HIDDEN_COUNTRIES };
+export { DEFAULT_COUNTRY };
 
 export interface PublicBonus {
   id: number;
@@ -111,7 +111,7 @@ const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 /**
  * Función única de visibilidad: activo, país del visitante en `countries`
- * (países con licencia; vacía = ninguno), no bloqueado y no oculto.
+ * (países donde se muestra; vacía = ninguno) y no bloqueado.
  * Sin país se trata como ES.
  */
 export function isBonusVisible(
@@ -120,7 +120,6 @@ export function isBonusVisible(
 ): boolean {
   if (!bonus.is_active) return false;
   const code = country ?? DEFAULT_COUNTRY;
-  if (HIDDEN_COUNTRIES.includes(code)) return false;
   if (bonus.blocked_countries.includes(code)) return false;
   return bonus.countries.includes(code);
 }
@@ -129,8 +128,6 @@ export function isBonusVisible(
 export async function getActiveBonuses(
   country: string | null
 ): Promise<PublicBonus[]> {
-  if (HIDDEN_COUNTRIES.includes(country ?? DEFAULT_COUNTRY)) return [];
-
   const { data, error } = await withMinDeposit((withMin) =>
     getSupabaseAdmin()
       .from("bonuses")
@@ -257,4 +254,27 @@ export async function deleteBonus(id: number): Promise<boolean> {
 
   if (error) throw error;
   return (data ?? []).length > 0;
+}
+
+/** Guarda el orden de la web: el primero de `ids` pasa a ser el 1. */
+export async function reorderBonuses(ids: number[]): Promise<void> {
+  const now = nowSeconds();
+  const supabase = getSupabaseAdmin();
+  const current = await getAllBonuses();
+  const byId = new Map(current.map((bonus) => [bonus.id, bonus]));
+  // Los que no vengan en la lista se quedan detrás, en su orden de antes.
+  const order = [...ids.filter((id) => byId.has(id)), ...current.map((b) => b.id).filter((id) => !ids.includes(id))];
+  await Promise.all(
+    order.map((id, index) =>
+      byId.get(id)?.position === index + 1
+        ? null
+        : supabase
+            .from("bonuses")
+            .update({ position: index + 1, updated_at: now })
+            .eq("id", id)
+            .then(({ error }) => {
+              if (error) throw error;
+            })
+    )
+  );
 }

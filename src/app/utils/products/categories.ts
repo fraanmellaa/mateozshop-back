@@ -7,6 +7,7 @@ import { isMissingColumn } from "./currency";
 // en los dos sitios.
 export const PRODUCT_CATEGORIES = [
   { key: "verificados", label: "Verificados" },
+  { key: "casino", label: "Casino" },
   { key: "tarjetas", label: "Tarjetas regalo" },
   { key: "skins", label: "Skins" },
   { key: "gaming", label: "Gaming" },

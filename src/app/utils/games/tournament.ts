@@ -272,7 +272,7 @@ export async function spinTournament(userId: number, tournamentId: number, count
     const balls = Array.from({ length: n }, (_, i) => {
       const { path, slot } = dropBall(entry.server_seed, entry.client_seed, entry.spins_used + i);
       const mult = t.multipliers[slot];
-      return { path, slot, mult, chipsWon: Math.floor(t.chips_per_spin * mult) };
+      return { path, slot, mult, chipsWon: Math.floor((t.chips_per_spin * Math.round(mult * 100)) / 100) };
     });
 
     try {

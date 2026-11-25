@@ -109,6 +109,8 @@ const updateSchema = z.object({
     .transform((v) => (v === "" || v === 0 ? null : v)),
   counts_for_cap: z.boolean().optional(),
   codes: z.array(z.string().trim().min(1).max(500)).max(10_000).optional(),
+  /** Lista de códigos que veía el admin al abrir el formulario (para detectar entregas entre medias). */
+  codes_before: z.array(z.string().trim().min(1).max(500)).max(10_000).optional(),
 });
 
 export async function PUT(
@@ -141,7 +143,22 @@ export async function PUT(
     if (body.stock !== undefined) updateData.stock = body.stock;
     if (body.value_eur !== undefined) updateData.value_eur = body.value_eur;
     if (body.requires_trade_link !== undefined) updateData.requires_trade_link = body.requires_trade_link;
-    if (body.codes !== undefined) updateData.codes = body.codes;
+    if (body.codes !== undefined) {
+      // Si desde que se abrió el formulario se ha entregado algún código, la
+      // lista del admin está vieja: guardarla volvería a meter códigos ya
+      // enviados y otro ganador recibiría uno repetido.
+      const current = existing.codes ?? [];
+      if (
+        body.codes_before !== undefined &&
+        (body.codes_before.length !== current.length || body.codes_before.some((code, i) => code !== current[i]))
+      ) {
+        return NextResponse.json(
+          { error: "Los códigos han cambiado mientras editabas (se ha entregado alguno). Cierra, vuelve a abrir el premio y repite el cambio." },
+          { status: 409 }
+        );
+      }
+      updateData.codes = body.codes;
+    }
     if (body.category !== undefined) updateData.category = body.category;
     // La fecha solo cuenta para ABRIR la puja: cambiarla no toca una ya abierta.
     if (body.available_from !== undefined) updateData.available_from = body.available_from;

@@ -6,8 +6,10 @@ import { getAdminTikTokLeaderboards } from "../utils/tiktok/leaderboards";
 import { getTikTokMonthPrizes } from "../utils/tiktok/monthPrizes";
 import MonthPrizes from "./MonthPrizes";
 import PageBody from "./PageBody";
+import { requireAdminPage } from "@/app/utils/auth";
 
 export default async function TikTokLeaderboardsPage() {
+  await requireAdminPage();
   const [leaderboards, monthPrizes] = await Promise.all([
     getAdminTikTokLeaderboards(),
     getTikTokMonthPrizes(adMonth()),

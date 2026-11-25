@@ -108,6 +108,10 @@ export default function EditProductModal({
         .split("\n")
         .map((c) => c.trim())
         .filter(Boolean);
+      changes.codes_before = initial.codesText
+        .split("\n")
+        .map((c) => c.trim())
+        .filter(Boolean);
     }
 
     if (Object.keys(changes).length === 0) {

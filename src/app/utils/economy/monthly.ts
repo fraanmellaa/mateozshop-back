@@ -1,4 +1,5 @@
 import { VipUnavailableError, vipResetBalances } from "@/app/utils/points/vip";
+import { isMissingFunction } from "@/app/utils/products/currency";
 import { getShopSettings } from "@/app/utils/shop/settings";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { closeMonthAuctions } from "@/app/utils/auctions/monthly";
@@ -152,6 +153,19 @@ export async function runMonthlyReset(options: { force?: boolean } = {}): Promis
       const { closed } = await closeMonthAuctions();
       steps.auctions = closed;
       await mark({ auctions_closed_at: nowSec(), auctions_closed: (row.auctions_closed ?? 0) + closed });
+    }
+
+    // 2b. Stock mensual compartido (tiradas de casino, migración 0043): con las
+    // pujas del mes ya cerradas, cada grupo vuelve a su stock del mes. Es
+    // idempotente por mes; sin la migración no hay grupos y no se hace nada.
+    step = "stock_groups";
+    {
+      const { data, error } = await supabase.rpc("shop_stock_groups_refill", { p_month: month });
+      if (error) {
+        if (!isMissingFunction(error, "shop_stock_groups_refill")) throw error;
+      } else {
+        steps.stockGroups = Number((data as { refilled?: number } | null)?.refilled ?? 0);
+      }
     }
 
     // 3. Sorteos.

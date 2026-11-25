@@ -1,12 +1,14 @@
 import { getProductById } from "@/app/utils/products";
 import { notFound } from "next/navigation";
 import Image from "next/image";
+import { requireAdminPage } from "@/app/utils/auth";
 
 export default async function ProductDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireAdminPage();
   const { id } = await params;
   const productId = parseInt(id);
   if (isNaN(productId)) {

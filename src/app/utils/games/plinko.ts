@@ -22,7 +22,8 @@ export function playBall(input: {
 }) {
   const { path, slot } = dropBall(input.serverSeed, input.clientSeed, input.nonce);
   const mult = input.table[slot];
-  return { path, slot, mult, payout: Math.floor(input.bet * mult) };
+  // En céntimos enteros: con decimales, 100 × 0,57 da 56,999… y se pagaría 1 punto de menos.
+  return { path, slot, mult, payout: Math.floor((input.bet * Math.round(mult * 100)) / 100) };
 }
 
 /**

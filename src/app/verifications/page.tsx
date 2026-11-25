@@ -7,12 +7,14 @@ import { listVerificationRequests, type AdminVerificationRequest } from "../util
 import { getMinDepositByCasino } from "../utils/bonuses";
 import { getCasinoFunnel, type CasinoFunnelRow } from "../utils/verification/stats";
 import PageBody from "./PageBody";
+import { requireAdminPage } from "@/app/utils/auth";
 
 export const dynamic = "force-dynamic";
 
 // Solicitudes de verificación de afiliados: el admin comprueba el usuario del
 // casino y aprueba (el usuario pasa a verificado y gana puntos VIP) o rechaza.
 export default async function VerificationsPage() {
+  await requireAdminPage();
   let requests: AdminVerificationRequest[] = [];
   let unavailable: string | null = null;
   try {

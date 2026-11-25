@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import type { Bonus } from "../utils/bonuses";
+import { COUNTRY_GROUPS } from "../utils/bonuses/countries";
 
 interface BonusModalProps {
   isOpen: boolean;
@@ -332,11 +333,11 @@ function BonusModalInner({
               value={form.conditions}
               onChange={(e) => setForm({ ...form, conditions: e.target.value })}
               placeholder="Solo nuevos clientes. Depósito mínimo 10 €..."
-              maxLength={300}
-              rows={2}
+              maxLength={1500}
+              rows={5}
             />
             <p className="text-xs text-muted-foreground">
-              Texto corto que se muestra al lado de la oferta.
+              Se abre en la web con el botón «Condiciones» de cada casino. {form.conditions.length}/1500
             </p>
           </div>
           <div className="space-y-2">
@@ -388,7 +389,29 @@ function BonusModalInner({
             </div>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="countries">Países con licencia</Label>
+            <Label htmlFor="countries">Dónde se muestra</Label>
+            <div className="flex flex-wrap gap-2">
+              {COUNTRY_GROUPS.map((group) => {
+                const on = group.codes.every((code) => allowed.codes.includes(code));
+                return (
+                  <Button
+                    key={group.label}
+                    type="button"
+                    size="sm"
+                    variant={on ? "default" : "outline"}
+                    onClick={() => {
+                      const next = on
+                        ? allowed.codes.filter((code) => !group.codes.includes(code))
+                        : [...allowed.codes, ...group.codes.filter((code) => !allowed.codes.includes(code))];
+                      setForm({ ...form, countries: next.join(", ") });
+                    }}
+                  >
+                    {on ? "✓ " : "+ "}
+                    {group.label}
+                  </Button>
+                );
+              })}
+            </div>
             <Input
               id="countries"
               value={form.countries}
@@ -396,7 +419,7 @@ function BonusModalInner({
               placeholder="ES, MX, AR"
             />
             <p className="text-xs text-muted-foreground">
-              Códigos de 2 letras separados por comas. Vacío = no se muestra en ningún país. Andorra (AD) queda siempre oculto, aunque lo añadas.
+              Pulsa una zona o escribe códigos de 2 letras separados por comas (ES, AD, MX...). Vacío = no se muestra en ningún país. Fuera de España la página de Bonos solo aparece si hay algún casino para ese país.
             </p>
           </div>
           <div className="space-y-2">

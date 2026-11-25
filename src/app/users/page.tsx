@@ -2,8 +2,10 @@ import { SiteHeader } from "../components/Header";
 import { getUsers } from "../utils/users";
 
 import PageBody from "./PageBody";
+import { requireAdminPage } from "@/app/utils/auth";
 
 export default async function ProductsPage() {
+  await requireAdminPage();
   const users = await getUsers();
 
   return (

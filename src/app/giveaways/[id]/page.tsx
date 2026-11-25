@@ -3,12 +3,14 @@ import { notFound } from "next/navigation";
 import Image from "next/image";
 import GiveawayDetailClient from "./GiveawayDetailClient";
 import ParticipantsList from "./ParticipantsList";
+import { requireAdminPage } from "@/app/utils/auth";
 
 export default async function GiveawayDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireAdminPage();
   const { id } = await params;
   const giveawayId = parseInt(id);
 
