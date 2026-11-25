@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { syncClassicPredictions } from "@/app/utils/classicPredictions";
 import { fetchLiveStatus as fetchKickLive } from "@/app/utils/kick/live";
 import { fetchTwitchLive } from "@/app/utils/twitch/helix";
 
@@ -197,6 +198,10 @@ export async function syncLiveState(): Promise<LiveState> {
   } catch (error) {
     console.error("maintainStreamerConnections failed:", error);
   }
+
+  // Con el directo encendido se abren las Predicciones (Classic) de serie que
+  // falten en este directo. No lanza nunca.
+  if (kickId !== null || twitchId !== null) await syncClassicPredictions();
 
   return {
     live: kickId !== null || twitchId !== null,
